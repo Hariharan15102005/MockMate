@@ -1,0 +1,117 @@
+# AgentHire - Production AI Recruitment & Candidate Assessment Platform
+
+## 1. Architecture Overview
+
+```
+                      +------------------------------------------+
+                      |               WEB BROWSER                |
+                      |          React 18 + Vite (SPA)           |
+                      +--------------------+---------------------+
+                                           |
+                                           | HTTP / REST (JWT)
+                                           v
++------------------------------------------------------------------------------------+
+|                             SPRING BOOT BACKEND (:8080)                            |
+|------------------------------------------------------------------------------------|
+|  - Role-Based Access Control (ADMIN, INTERVIEW_ENGINEER, INSTRUCTOR, CANDIDATE)    |
+|  - Business Workflow Engine (Candidate Intake -> Review -> Schedule -> Evaluation)  |
+|  - JPA/Hibernate with MySQL (Single Source of Truth for Data & Deterministic Score)|
+|  - REST APIs with OpenAPI / Swagger Docs                                           |
+|  - Audit Log & Notification Dispatcher                                             |
++------------------------------------------+-----------------------------------------+
+                                           |
+                                           | Internal HTTP / JSON
+                                           v
++------------------------------------------------------------------------------------+
+|                              FASTAPI AI SERVICE (:8000)                            |
+|------------------------------------------------------------------------------------|
+|  - LangGraph Stateful Interview Engine                                             |
+|  - Resume Parser & Verification Agent                                              |
+|  - Adaptive Technical / Coding / Behavioral / Learning Evaluator                   |
+|  - Guardrails & Bias Mitigation Engine                                             |
++------------------------------------------------------------------------------------+
+```
+
+## 2. Folder Structure
+
+```
+agenthire/
+|-- backend/
+|   |-- pom.xml
+|   |-- src/
+|   |   |-- main/
+|   |   |   |-- java/com/agenthire/
+|   |   |   |   |-- AgentHireApplication.java
+|   |   |   |   |-- config/          # Security, WebMvc, Swagger, Cors Configs
+|   |   |   |   |-- controller/      # REST API Controllers
+|   |   |   |   |-- dto/             # Request/Response Data Transfer Objects
+|   |   |   |   |-- entity/          # JPA Domain Entities
+|   |   |   |   |-- repository/      # Spring Data JPA Repositories
+|   |   |   |   |-- service/         # Business Logic Layer
+|   |   |   |   |-- security/        # JWT Tokens, UserDetails, Filters
+|   |   |   |   |-- exception/       # Global Exception Handler & Custom Errors
+|   |   |   |   |-- mapper/          # DTO <-> Entity Mappers
+|   |   |   |   |-- audit/           # Audit Logging Interceptors & Entities
+|   |   |   |   |-- notification/   # Notification Services
+|   |   |   |   +-- util/            # Helpers and Constants
+|   |   |   +-- resources/
+|   |   |       |-- application.yml
+|   |   |       +-- application-dev.yml
+|   +-- .env.example
+|
+|-- ai-service/
+|   |-- app/
+|   |   |-- main.py                  # FastAPI Application Entry
+|   |   |-- core/                    # Settings & Configuration
+|   |   |-- agents/                  # Specialized Agents (Resume, Technical, Coding, etc.)
+|   |   |-- graphs/                  # LangGraph Workflow Definitions
+|   |   |-- schemas/                 # Pydantic Request/Response Models
+|   |   |-- prompts/                 # System Prompts & Rubrics
+|   |   |-- guardrails/              # Safety, Non-discrimination & Anti-hallucination
+|   |   +-- services/                # Text Extraction & Model Invocations
+|   |-- requirements.txt
+|   +-- .env.example
+|
+|-- frontend/
+|   |-- package.json
+|   |-- vite.config.js
+|   |-- index.html
+|   |-- src/
+|   |   |-- api/                     # Axios Client & Endpoint Definitions
+|   |   |-- components/              # Common UI (Navbar, Sidebar, Modal, Badge, Card, etc.)
+|   |   |-- context/                 # AuthContext, NotificationContext
+|   |   |-- pages/                   # Dashboards & Role-specific Views
+|   |   |   |-- auth/
+|   |   |   |-- admin/
+|   |   |   |-- engineer/
+|   |   |   |-- instructor/
+|   |   |   |-- candidate/
+|   |   |   +-- common/              # HealthTest, NotFound, Landing
+|   |   |-- styles/                  # Design System Tokens & Custom CSS
+|   |   |-- App.jsx
+|   |   +-- main.jsx
+|   +-- .env.example
+|
++-- docs/
+    +-- API_SPECIFICATION.md
+```
+
+## 3. Database Strategy
+- **Source of Truth**: Spring Boot + MySQL via Spring Data JPA.
+- **Relational Integrity**: Foreign key constraints on users, roles, candidates, interviews, rounds, and audit logs.
+- **Audit & Timestamps**: Base audited entity with `createdAt`, `updatedAt`, and explicit `AuditLog` table for state transitions.
+- **Strict Separation**: AI reasoning outputs are stored as structured JSON/text evaluation entities, with final scores calculated deterministically in Spring Boot.
+
+## 4. API Strategy
+- **Standardized Response Envelope**: Uniform error formats `{ timestamp, status, error, message, path }`.
+- **Strict Role Authorization**: Spring Security `@PreAuthorize` on controller endpoints backed by JWT claims.
+- **Swagger Documentation**: Live OpenAPI v3 specs at `/swagger-ui/index.html`.
+
+## 5. Frontend Routing Strategy
+- `/` -> Landing / Portal Entry
+- `/health-test` -> Full Service Connectivity & Health Diagnostic Monitor
+- `/login`, `/register` -> Authentication
+- `/admin/*` -> Admin Dashboard & User Management (Role: `ADMIN`)
+- `/engineer/*` -> Candidate Intake, Verification, Assignment & Report Delivery (Role: `INTERVIEW_ENGINEER`)
+- `/instructor/*` -> Candidate Review, Interview Builder, Evaluation & Final Decision (Role: `INSTRUCTOR`)
+- `/candidate/*` -> Device Check, Live Interview Room, Assessment View (Role: `CANDIDATE`)

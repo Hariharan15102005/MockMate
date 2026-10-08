@@ -1,0 +1,15 @@
+package com.agenthire.entity.enums;
+
+public enum CandidateStatus {
+    PENDING_VERIFICATION,
+    VERIFIED,
+    SENT_TO_INSTRUCTOR,
+    ACCEPTED_BY_INSTRUCTOR,
+    INTERVIEW_SCHEDULED,
+    INTERVIEW_IN_PROGRESS,
+    INTERVIEW_COMPLETED,
+    REPORT_READY,
+    FINAL_REVIEW,
+    SELECTED,
+    REJECTED
+}

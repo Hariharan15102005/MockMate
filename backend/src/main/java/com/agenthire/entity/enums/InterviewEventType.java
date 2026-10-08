@@ -1,0 +1,15 @@
+package com.agenthire.entity.enums;
+
+public enum InterviewEventType {
+    SESSION_STARTED,
+    ROUND_STARTED,
+    QUESTION_ASKED,
+    ANSWER_SUBMITTED,
+    QUESTION_EVALUATED,
+    TASK_STARTED,
+    TASK_SUBMITTED,
+    ROUND_COMPLETED,
+    SESSION_PAUSED,
+    SESSION_RESUMED,
+    SESSION_COMPLETED
+}
