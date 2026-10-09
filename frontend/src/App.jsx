@@ -157,6 +157,7 @@ export const App = () => {
                       <Route path="candidates/intake" element={<CandidateIntake />} />
                       <Route path="candidates/:id" element={<CandidateDetail />} />
                       <Route path="candidates/pending" element={<PendingVerification />} />
+                      <Route path="pending-verification" element={<PendingVerification />} />
 
                       <Route path="assignments" element={<EngineerAssignments />} />
                       <Route path="assignments/sent" element={<SentAssignments />} />

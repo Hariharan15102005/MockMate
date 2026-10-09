@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
@@ -6,7 +6,15 @@ import Button from '../../components/common/Button';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSkeleton from '../../components/common/LoadingSkeleton';
 import ErrorState from '../../components/common/ErrorState';
-import { getCandidateByIdApi, updateCandidateApi } from '../../api/engineer';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
+import ActivityTimeline from '../../components/common/ActivityTimeline';
+import {
+  getCandidateByIdApi,
+  updateCandidateApi,
+  verifyCandidateApi,
+  rejectCandidateApi,
+  getCandidateAuditApi
+} from '../../api/engineer';
 import {
   User,
   Mail,
@@ -20,13 +28,17 @@ import {
   Calendar,
   Award,
   CheckCircle2,
+  XCircle,
   Clock,
   Send,
   Sliders,
   ChevronRight,
   Save,
   X,
-  AlertCircle
+  AlertCircle,
+  ShieldCheck,
+  UserCheck,
+  History
 } from 'lucide-react';
 
 export const CandidateDetail = () => {
@@ -34,8 +46,20 @@ export const CandidateDetail = () => {
   const navigate = useNavigate();
 
   const [candidate, setCandidate] = useState(null);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionSuccess, setActionSuccess] = useState(null);
+
+  // Verification Dialog
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+
+  // Rejection Modal
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [rejectLoading, setRejectLoading] = useState(false);
+  const [rejectError, setRejectError] = useState(null);
 
   // Edit Modal State
   const [isEditing, setIsEditing] = useState(false);
@@ -43,27 +67,32 @@ export const CandidateDetail = () => {
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState(null);
 
-  const fetchCandidate = async () => {
+  const fetchCandidateData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getCandidateByIdApi(id);
-      setCandidate(data);
+      const [candidateData, auditData] = await Promise.all([
+        getCandidateByIdApi(id),
+        getCandidateAuditApi(id).catch(() => [])
+      ]);
+
+      setCandidate(candidateData);
+      setAuditLogs(auditData || []);
       setEditFormData({
-        fullName: data.fullName,
-        email: data.email,
-        phone: data.phone,
-        location: data.location,
-        college: data.college,
-        degree: data.degree,
-        department: data.department,
-        graduationYear: data.graduationYear,
-        cgpa: data.cgpa ?? '',
-        experienceLevel: data.experienceLevel || 'FRESHER',
-        appliedRole: data.appliedRole,
-        applicationId: data.applicationId,
-        source: data.source || 'CAMPUS',
-        engineerNotes: data.engineerNotes || ''
+        fullName: candidateData.fullName,
+        email: candidateData.email,
+        phone: candidateData.phone,
+        location: candidateData.location,
+        college: candidateData.college,
+        degree: candidateData.degree,
+        department: candidateData.department,
+        graduationYear: candidateData.graduationYear,
+        cgpa: candidateData.cgpa ?? '',
+        experienceLevel: candidateData.experienceLevel || 'FRESHER',
+        appliedRole: candidateData.appliedRole,
+        applicationId: candidateData.applicationId,
+        source: candidateData.source || 'CAMPUS',
+        engineerNotes: candidateData.engineerNotes || ''
       });
     } catch (err) {
       console.error('Failed to load candidate details:', err);
@@ -71,11 +100,58 @@ export const CandidateDetail = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
-    fetchCandidate();
-  }, [id]);
+    fetchCandidateData();
+  }, [fetchCandidateData]);
+
+  // Handle Candidate Verification
+  const handleVerifyCandidate = async () => {
+    setVerifyLoading(true);
+    try {
+      const updated = await verifyCandidateApi(id);
+      setCandidate(updated);
+      setVerifyDialogOpen(false);
+      setActionSuccess('Candidate has been verified successfully. Intake review complete.');
+      // Refresh audit logs
+      const updatedAudit = await getCandidateAuditApi(id).catch(() => []);
+      setAuditLogs(updatedAudit);
+    } catch (err) {
+      console.error('Verification failed:', err);
+      alert(err.response?.data?.message || 'Failed to verify candidate.');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  // Handle Candidate Rejection
+  const handleRejectCandidate = async (e) => {
+    e.preventDefault();
+    const trimmedReason = rejectionReason.trim();
+    if (!trimmedReason) {
+      setRejectError('Please provide a specific reason for rejection.');
+      return;
+    }
+
+    setRejectLoading(true);
+    setRejectError(null);
+    try {
+      const updated = await rejectCandidateApi(id, trimmedReason);
+      setCandidate(updated);
+      setRejectModalOpen(false);
+      setRejectionReason('');
+      setActionSuccess('Candidate application has been rejected and recorded with reason.');
+      // Refresh audit logs
+      const updatedAudit = await getCandidateAuditApi(id).catch(() => []);
+      setAuditLogs(updatedAudit);
+    } catch (err) {
+      console.error('Rejection failed:', err);
+      setRejectError(err.response?.data?.message || 'Failed to reject candidate.');
+    } finally {
+      setRejectLoading(false);
+    }
+  };
 
   const handleEditChange = (e) => {
     const { name, value } = e.target;
@@ -98,6 +174,9 @@ export const CandidateDetail = () => {
       const updated = await updateCandidateApi(id, payload);
       setCandidate(updated);
       setIsEditing(false);
+      setActionSuccess('Candidate details updated successfully.');
+      const updatedAudit = await getCandidateAuditApi(id).catch(() => []);
+      setAuditLogs(updatedAudit);
     } catch (err) {
       console.error('Update failed:', err);
       if (err.response?.status === 409) {
@@ -125,18 +204,43 @@ export const CandidateDetail = () => {
       <ErrorState
         title="Candidate Not Found"
         message={error || 'The requested candidate profile does not exist.'}
-        onRetry={fetchCandidate}
+        onRetry={fetchCandidateData}
       />
     );
   }
 
+  const isPendingVerification = candidate.status === 'PENDING_VERIFICATION';
+  const isVerified = candidate.status === 'VERIFIED';
+  const isRejected = candidate.status === 'REJECTED';
+
   const pipelineStages = [
-    { name: 'Intake Created', status: 'completed', label: 'Done' },
-    { name: 'Verification', status: 'active', label: candidate.status },
-    { name: 'Instructor Routing', status: 'upcoming', label: 'Phase 6' },
-    { name: 'AI Interview', status: 'upcoming', label: 'Phase 7' },
-    { name: 'Evaluation Report', status: 'upcoming', label: 'Phase 8' }
+    { name: 'Intake Created', status: 'completed', label: 'Completed' },
+    {
+      name: 'Verification',
+      status: isVerified ? 'completed' : isRejected ? 'failed' : 'active',
+      label: isVerified ? 'Verified' : isRejected ? 'Rejected' : 'Pending Review'
+    },
+    { name: 'Instructor Routing', status: 'upcoming', label: 'Phase 8' },
+    { name: 'AI Interview', status: 'upcoming', label: 'Phase 9+' },
+    { name: 'Evaluation Report', status: 'upcoming', label: 'Phase 10+' }
   ];
+
+  // Map audit logs to ActivityTimeline format
+  const timelineEvents = auditLogs.map((log) => {
+    let type = 'default';
+    if (log.action === 'CANDIDATE_VERIFIED') type = 'success';
+    else if (log.action === 'CANDIDATE_REJECTED') type = 'alert';
+    else if (log.action === 'CANDIDATE_CREATED') type = 'report';
+
+    const actorName = log.actor?.fullName || 'System User';
+    return {
+      id: log.id,
+      title: log.action.replace(/_/g, ' '),
+      type,
+      description: `${log.description} (${actorName})`,
+      timestamp: log.createdAt ? new Date(log.createdAt).toLocaleString() : ''
+    };
+  });
 
   return (
     <div>
@@ -145,25 +249,175 @@ export const CandidateDetail = () => {
         subtitle={`Application ID: ${candidate.applicationId} • Applied for ${candidate.appliedRole}`}
         badge={<StatusBadge status={candidate.status} />}
         actions={
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <Link to="/engineer/candidates">
               <Button variant="outline" size="sm" icon={ArrowLeft}>
                 Back to List
               </Button>
             </Link>
-            <Button variant="primary" size="sm" icon={Edit} onClick={() => setIsEditing(true)}>
+
+            {isPendingVerification && (
+              <>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  icon={CheckCircle2}
+                  onClick={() => setVerifyDialogOpen(true)}
+                  disabled={verifyLoading}
+                >
+                  Verify Candidate
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={XCircle}
+                  onClick={() => {
+                    setRejectError(null);
+                    setRejectionReason('');
+                    setRejectModalOpen(true);
+                  }}
+                  disabled={rejectLoading}
+                >
+                  Reject Candidate
+                </Button>
+              </>
+            )}
+
+            <Button variant="secondary" size="sm" icon={Edit} onClick={() => setIsEditing(true)}>
               Edit Details
             </Button>
           </div>
         }
       />
 
+      {/* Success Notification Banner */}
+      {actionSuccess && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0.875rem 1.25rem',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid var(--success-border)',
+            color: 'var(--success)',
+            marginBottom: '1.5rem',
+            fontSize: '0.875rem'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <CheckCircle2 size={18} />
+            <span>{actionSuccess}</span>
+          </div>
+          <button
+            onClick={() => setActionSuccess(null)}
+            style={{ color: 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
+            aria-label="Dismiss banner"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Verification / Rejection Status Metadata Banner */}
+      {isVerified && candidate.verifiedBy && (
+        <div
+          className="card"
+          style={{
+            marginBottom: '1.5rem',
+            padding: '1.25rem',
+            background: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1rem'
+          }}
+        >
+          <div style={{ padding: '0.5rem', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)' }}>
+            <ShieldCheck size={24} />
+          </div>
+          <div>
+            <div style={{ fontWeight: '700', color: 'var(--success)', fontSize: '0.95rem' }}>
+              Candidate Verification Completed
+            </div>
+            <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+              Verified by <strong style={{ color: 'var(--text-primary)' }}>{candidate.verifiedBy.fullName}</strong> ({candidate.verifiedBy.email}) on{' '}
+              {candidate.verifiedAt ? new Date(candidate.verifiedAt).toLocaleString() : '—'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isRejected && (
+        <div
+          className="card"
+          style={{
+            marginBottom: '1.5rem',
+            padding: '1.25rem',
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.25)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '1rem'
+          }}
+        >
+          <div style={{ padding: '0.5rem', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.2)', color: 'var(--danger)', marginTop: '0.15rem' }}>
+            <XCircle size={24} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: '700', color: 'var(--danger)', fontSize: '0.95rem' }}>
+              Candidate Application Rejected
+            </div>
+            <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+              Rejected by <strong style={{ color: 'var(--text-primary)' }}>{candidate.rejectedBy?.fullName || 'Interview Engineer'}</strong> on{' '}
+              {candidate.rejectedAt ? new Date(candidate.rejectedAt).toLocaleString() : '—'}
+            </div>
+            {candidate.rejectionReason && (
+              <div
+                style={{
+                  marginTop: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(0, 0, 0, 0.25)',
+                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.85rem'
+                }}
+              >
+                <strong style={{ color: 'var(--danger)', display: 'block', marginBottom: '0.25rem' }}>Rejection Reason:</strong>
+                {candidate.rejectionReason}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Visual Pipeline Progression Indicator */}
-      <Card title="Recruitment Pipeline Progression" subtitle="Current status in candidate intake workflow" style={{ marginBottom: '2rem' }}>
+      <Card title="Recruitment Pipeline Progression" subtitle="Current status in recruitment lifecycle" style={{ marginBottom: '2rem' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem', marginTop: '0.5rem' }}>
           {pipelineStages.map((stage, idx) => {
             const isCompleted = stage.status === 'completed';
             const isActive = stage.status === 'active';
+            const isFailed = stage.status === 'failed';
+
+            let bgColor = 'rgba(255, 255, 255, 0.02)';
+            let borderColor = 'var(--border-color)';
+            let tagColor = 'var(--text-muted)';
+
+            if (isCompleted) {
+              bgColor = 'rgba(16, 185, 129, 0.08)';
+              borderColor = 'var(--success-border)';
+              tagColor = 'var(--success)';
+            } else if (isActive) {
+              bgColor = 'rgba(99, 102, 241, 0.1)';
+              borderColor = 'var(--primary)';
+              tagColor = 'var(--primary)';
+            } else if (isFailed) {
+              bgColor = 'rgba(239, 68, 68, 0.08)';
+              borderColor = 'var(--danger-border)';
+              tagColor = 'var(--danger)';
+            }
 
             return (
               <div
@@ -171,23 +425,23 @@ export const CandidateDetail = () => {
                 style={{
                   padding: '1rem',
                   borderRadius: 'var(--radius-md)',
-                  background: isActive ? 'rgba(99, 102, 241, 0.1)' : isCompleted ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.02)',
-                  border: `1px solid ${isActive ? 'var(--primary)' : isCompleted ? 'var(--success-border)' : 'var(--border-color)'}`,
+                  background: bgColor,
+                  border: `1px solid ${borderColor}`,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '0.35rem'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: '700', color: isCompleted ? 'var(--success)' : isActive ? 'var(--primary)' : 'var(--text-muted)' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: '700', color: tagColor }}>
                     STAGE {idx + 1}
                   </span>
-                  {isCompleted ? <CheckCircle2 size={14} color="var(--success)" /> : isActive ? <Clock size={14} color="var(--primary)" /> : null}
+                  {isCompleted ? <CheckCircle2 size={14} color="var(--success)" /> : isFailed ? <XCircle size={14} color="var(--danger)" /> : isActive ? <Clock size={14} color="var(--primary)" /> : null}
                 </div>
                 <div style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>
                   {stage.name}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: isCompleted ? 'var(--success)' : isActive ? 'var(--primary)' : 'var(--text-muted)' }}>
+                <div style={{ fontSize: '0.75rem', color: tagColor }}>
                   {stage.label}
                 </div>
               </div>
@@ -299,6 +553,117 @@ export const CandidateDetail = () => {
           </div>
         </Card>
       </div>
+
+      {/* Verification History & Audit Trail Section */}
+      <Card
+        title="Verification History & Audit Trail"
+        subtitle="Chronological lifecycle transitions and administrative actions"
+        style={{ marginBottom: '2rem' }}
+      >
+        <ActivityTimeline
+          events={timelineEvents}
+          emptyMessage="No verification history or lifecycle audit logs recorded yet."
+        />
+      </Card>
+
+      {/* VERIFICATION CONFIRMATION DIALOG */}
+      <ConfirmDialog
+        isOpen={verifyDialogOpen}
+        title="Verify Candidate Intake?"
+        message={`You are confirming that ${candidate.fullName}'s submitted intake parameters and background eligibility have been reviewed and approved for the next recruitment stage.`}
+        confirmLabel={verifyLoading ? 'Verifying...' : 'Verify Candidate'}
+        cancelLabel="Cancel"
+        variant="primary"
+        onConfirm={handleVerifyCandidate}
+        onCancel={() => !verifyLoading && setVerifyDialogOpen(false)}
+      />
+
+      {/* REJECTION MODAL */}
+      {rejectModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            zIndex: 1000
+          }}
+          onClick={() => !rejectLoading && setRejectModalOpen(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '520px',
+              width: '100%',
+              padding: '2rem',
+              position: 'relative'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <XCircle size={22} color="var(--danger)" />
+                <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>
+                  Reject Candidate
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !rejectLoading && setRejectModalOpen(false)}
+                style={{ color: 'var(--text-muted)', padding: '4px' }}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {rejectError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                <AlertCircle size={16} />
+                <span>{rejectError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleRejectCandidate}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Reason for Rejection *</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{rejectionReason.length} / 1000</span>
+                </label>
+                <textarea
+                  className="form-input"
+                  rows="4"
+                  maxLength={1000}
+                  placeholder="Provide detailed justification (e.g. academic criteria unmet, duplicate application, unverified profile)..."
+                  value={rejectionReason}
+                  onChange={(e) => {
+                    setRejectionReason(e.target.value);
+                    setRejectError(null);
+                  }}
+                  required
+                  autoFocus
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', margin: 0 }}>
+                  This reason will be permanently recorded in the candidate's recruitment audit history.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <Button variant="secondary" size="sm" type="button" onClick={() => setRejectModalOpen(false)} disabled={rejectLoading}>
+                  Cancel
+                </Button>
+                <Button variant="danger" size="sm" type="submit" loading={rejectLoading} disabled={rejectLoading || !rejectionReason.trim()}>
+                  {rejectLoading ? 'Rejecting...' : 'Reject Candidate'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* EDIT MODAL DIALOG */}
       {isEditing && (

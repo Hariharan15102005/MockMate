@@ -5,14 +5,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.UUID;
+
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CandidateStatsResponse {
-    private long totalCandidates;
-    private long pendingVerification;
-    private long verified;
-    private long rejected;
-    private long sentToInstructors;
+public class UserSummaryResponse {
+    private UUID id;
+    private String fullName;
+    private String email;
 }

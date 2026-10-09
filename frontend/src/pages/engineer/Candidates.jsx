@@ -175,6 +175,7 @@ export const EngineerCandidates = () => {
               <option value="">All Statuses</option>
               <option value="PENDING_VERIFICATION">Pending Verification</option>
               <option value="VERIFIED">Verified</option>
+              <option value="REJECTED">Rejected</option>
               <option value="SENT_TO_INSTRUCTOR">Sent to Instructor</option>
               <option value="INTERVIEW_SCHEDULED">Interview Scheduled</option>
               <option value="INTERVIEW_COMPLETED">Interview Completed</option>

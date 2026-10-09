@@ -23,19 +23,24 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 
+import jakarta.persistence.ManyToOne;
+import java.time.Instant;
+
 @Entity
 @Table(name = "candidates", indexes = {
         @Index(name = "idx_candidate_email", columnList = "email"),
         @Index(name = "idx_candidate_status", columnList = "status"),
         @Index(name = "idx_candidate_applied_role", columnList = "applied_role"),
-        @Index(name = "idx_candidate_application_id", columnList = "application_id", unique = true)
+        @Index(name = "idx_candidate_application_id", columnList = "application_id", unique = true),
+        @Index(name = "idx_candidate_verified_at", columnList = "verified_at"),
+        @Index(name = "idx_candidate_rejected_at", columnList = "rejected_at")
 })
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@ToString(exclude = "user")
+@ToString(exclude = {"user", "verifiedBy", "rejectedBy"})
 public class Candidate extends BaseEntity {
 
     @OneToOne(fetch = FetchType.LAZY)
@@ -106,4 +111,21 @@ public class Candidate extends BaseEntity {
 
     @Column(name = "engineer_notes", columnDefinition = "TEXT")
     private String engineerNotes;
+
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "verified_by_id")
+    private User verifiedBy;
+
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rejected_by_id")
+    private User rejectedBy;
+
+    @Column(name = "rejected_at")
+    private Instant rejectedAt;
 }

@@ -30,6 +30,11 @@ public class CandidateResponse {
     private String source;
     private CandidateStatus status;
     private String engineerNotes;
+    private String rejectionReason;
+    private UserSummaryResponse verifiedBy;
+    private Instant verifiedAt;
+    private UserSummaryResponse rejectedBy;
+    private Instant rejectedAt;
     private Instant createdAt;
     private Instant updatedAt;
 }
