@@ -28,7 +28,9 @@ import AdminSettings from './pages/admin/Settings';
 // Engineer Pages
 import EngineerDashboard from './pages/engineer/Dashboard';
 import EngineerCandidates from './pages/engineer/Candidates';
+import CandidateDetail from './pages/engineer/CandidateDetail';
 import CandidateIntake from './pages/engineer/CandidateIntake';
+
 import PendingVerification from './pages/engineer/PendingVerification';
 import EngineerAssignments from './pages/engineer/Assignments';
 import SentAssignments from './pages/engineer/SentAssignments';
@@ -153,7 +155,9 @@ export const App = () => {
                       <Route path="dashboard" element={<EngineerDashboard />} />
                       <Route path="candidates" element={<EngineerCandidates />} />
                       <Route path="candidates/intake" element={<CandidateIntake />} />
+                      <Route path="candidates/:id" element={<CandidateDetail />} />
                       <Route path="candidates/pending" element={<PendingVerification />} />
+
                       <Route path="assignments" element={<EngineerAssignments />} />
                       <Route path="assignments/sent" element={<SentAssignments />} />
                       <Route path="assignments/pending" element={<PendingAssignments />} />

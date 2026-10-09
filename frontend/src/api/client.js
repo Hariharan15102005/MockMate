@@ -91,3 +91,6 @@ export const checkAiServiceHealth = async () => {
     };
   }
 };
+
+export default backendApi;
+

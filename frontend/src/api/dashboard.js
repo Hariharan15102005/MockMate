@@ -6,6 +6,8 @@
  * ready for seamless backend endpoint connection in Phase 5+.
  */
 
+import { getEngineerDashboardStatsApi } from './engineer';
+
 export const getAdminStats = async () => {
   return {
     totalUsers: 0,
@@ -18,15 +20,33 @@ export const getAdminStats = async () => {
 };
 
 export const getEngineerStats = async () => {
-  return {
-    newCandidates: 0,
-    pendingVerification: 0,
-    sentToInstructors: 0,
-    awaitingInstructorResponse: 0,
-    interviewsCompleted: 0,
-    reportsReady: 0
-  };
+  try {
+    const stats = await getEngineerDashboardStatsApi();
+    return {
+      totalCandidates: stats.totalCandidates || 0,
+      newCandidates: stats.totalCandidates || 0,
+      pendingVerification: stats.pendingVerification || 0,
+      verified: stats.verified || 0,
+      sentToInstructors: stats.sentToInstructors || 0,
+      awaitingInstructorResponse: 0,
+      interviewsCompleted: 0,
+      reportsReady: 0
+    };
+  } catch (err) {
+    console.error('Failed to load engineer dashboard stats from backend:', err);
+    return {
+      totalCandidates: 0,
+      newCandidates: 0,
+      pendingVerification: 0,
+      verified: 0,
+      sentToInstructors: 0,
+      awaitingInstructorResponse: 0,
+      interviewsCompleted: 0,
+      reportsReady: 0
+    };
+  }
 };
+
 
 export const getInstructorStats = async () => {
   return {
