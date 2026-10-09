@@ -78,6 +78,20 @@ public class CandidateAssignment extends BaseEntity {
     @Column(name = "assigned_at")
     private Instant assignedAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "accepted_by_id")
+    private User acceptedBy;
+
     @Column(name = "accepted_at")
     private Instant acceptedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "declined_by_id")
+    private User declinedBy;
+
+    @Column(name = "declined_at")
+    private Instant declinedAt;
+
+    @Column(name = "decline_reason", columnDefinition = "TEXT")
+    private String declineReason;
 }

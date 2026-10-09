@@ -288,6 +288,10 @@ public class EngineerAssignmentService {
                 .status(ca.getStatus())
                 .assignedAt(ca.getAssignedAt())
                 .acceptedAt(ca.getAcceptedAt())
+                .acceptedByName(ca.getAcceptedBy() != null ? ca.getAcceptedBy().getFullName() : null)
+                .declinedAt(ca.getDeclinedAt())
+                .declinedByName(ca.getDeclinedBy() != null ? ca.getDeclinedBy().getFullName() : null)
+                .declineReason(ca.getDeclineReason())
                 .createdAt(ca.getCreatedAt())
                 .build();
     }

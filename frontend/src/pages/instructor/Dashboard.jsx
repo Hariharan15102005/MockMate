@@ -6,7 +6,7 @@ import StatCard from '../../components/common/StatCard';
 import Card from '../../components/common/Card';
 import Button from '../../components/common/Button';
 import ActivityTimeline from '../../components/common/ActivityTimeline';
-import { getInstructorStats } from '../../api/dashboard';
+import { getInstructorStatsApi } from '../../api/instructor';
 import {
   BookOpen,
   Users,
@@ -17,30 +17,40 @@ import {
   ArrowRight,
   Clock,
   CheckCircle2,
-  ChevronRight
+  ChevronRight,
+  XCircle
 } from 'lucide-react';
 
 export const InstructorDashboard = () => {
   const { user } = useAuth();
   const [stats, setStats] = useState({
     assignedCandidates: 0,
-    pendingReviews: 0,
-    upcomingInterviews: 0,
-    inProgress: 0,
-    completed: 0,
-    reportsReady: 0
+    pendingReview: 0,
+    accepted: 0,
+    declined: 0
   });
 
   useEffect(() => {
-    getInstructorStats().then(setStats);
+    getInstructorStatsApi()
+      .then((data) => {
+        if (data) {
+          setStats({
+            assignedCandidates: data.assignedCandidates || 0,
+            pendingReview: data.pendingReview || 0,
+            accepted: data.accepted || 0,
+            declined: data.declined || 0
+          });
+        }
+      })
+      .catch((err) => console.error('Failed to load instructor stats:', err));
   }, []);
 
   const instructorStages = [
     { title: 'Assigned Portfolio', count: stats.assignedCandidates, icon: Users, color: 'var(--accent-purple)', link: '/instructor/candidates' },
-    { title: 'Candidate Review', count: stats.pendingReviews, icon: Clock, color: 'var(--warning)', link: '/instructor/candidates/pending' },
-    { title: 'Interview Builder', count: stats.upcomingInterviews, icon: Sliders, color: 'var(--primary)', link: '/instructor/interviews/builder' },
-    { title: 'Completed Sessions', count: stats.completed, icon: CheckCircle2, color: 'var(--info)', link: '/instructor/interviews/completed' },
-    { title: 'Evaluation & Decision', count: stats.reportsReady, icon: FileText, color: 'var(--success)', link: '/instructor/reports' }
+    { title: 'Pending Review', count: stats.pendingReview, icon: Clock, color: 'var(--warning)', link: '/instructor/candidates/pending' },
+    { title: 'Accepted Profiles', count: stats.accepted, icon: CheckCircle2, color: 'var(--success)', link: '/instructor/candidates' },
+    { title: 'Declined Candidates', count: stats.declined, icon: XCircle, color: 'var(--danger)', link: '/instructor/candidates' },
+    { title: 'Interview Builder', count: 0, icon: Sliders, color: 'var(--primary)', link: '/instructor/interviews/builder' }
   ];
 
   return (
@@ -73,24 +83,24 @@ export const InstructorDashboard = () => {
         />
         <StatCard
           title="Pending Reviews"
-          value={stats.pendingReviews}
-          subtitle="Profile inspection"
+          value={stats.pendingReview}
+          subtitle="Awaiting instructor decision"
           icon={Clock}
           color="amber"
         />
         <StatCard
-          title="Scheduled Interviews"
-          value={stats.upcomingInterviews}
-          subtitle="Upcoming sessions"
-          icon={Calendar}
-          color="cyan"
+          title="Accepted Candidates"
+          value={stats.accepted}
+          subtitle="Ready for configuration"
+          icon={CheckCircle2}
+          color="emerald"
         />
         <StatCard
-          title="Reports for Review"
-          value={stats.reportsReady}
-          subtitle="Awaiting final decision"
-          icon={FileText}
-          color="emerald"
+          title="Declined Candidates"
+          value={stats.declined}
+          subtitle="Non-matching profiles"
+          icon={XCircle}
+          color="rose"
         />
       </div>
 

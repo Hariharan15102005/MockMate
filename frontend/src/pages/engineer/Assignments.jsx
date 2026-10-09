@@ -132,7 +132,50 @@ export const EngineerAssignments = () => {
     {
       header: 'Routing Status',
       accessor: 'status',
-      render: (row) => <StatusBadge status={row.status} size="sm" />
+      render: (row) => (
+        <div>
+          <StatusBadge status={row.status} size="sm" />
+          {row.status === 'ACCEPTED' && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: '600', marginTop: '0.2rem' }}>
+              Ready for Interview Config
+            </div>
+          )}
+          {row.status === 'DECLINED' && row.declineReason && (
+            <div
+              style={{
+                fontSize: '0.72rem',
+                color: 'var(--danger)',
+                marginTop: '0.2rem',
+                maxWidth: '180px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+              title={row.declineReason}
+            >
+              Reason: {row.declineReason}
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
+      header: 'Decision Date',
+      accessor: 'decisionDate',
+      render: (row) => {
+        const date = row.acceptedAt || row.declinedAt;
+        if (!date) return <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Pending Review</span>;
+        return (
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: '600' }}>
+              {new Date(date).toLocaleDateString()}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              by {row.acceptedByName || row.declinedByName || 'Instructor'}
+            </div>
+          </div>
+        );
+      }
     },
     {
       header: 'Assigned Date',

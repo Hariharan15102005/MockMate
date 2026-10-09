@@ -2,6 +2,8 @@ package com.agenthire.entity.enums;
 
 public enum NotificationType {
     CANDIDATE_ASSIGNED,
+    CANDIDATE_ASSIGNMENT_ACCEPTED,
+    CANDIDATE_ASSIGNMENT_DECLINED,
     CANDIDATE_VERIFIED,
     INTERVIEW_SCHEDULED,
     INTERVIEW_STARTED,
@@ -10,3 +12,4 @@ public enum NotificationType {
     REPORT_SENT,
     SYSTEM
 }
+

@@ -26,6 +26,10 @@ public class CandidateAssignmentDetailResponse {
     private AssignmentStatus status;
     private Instant assignedAt;
     private Instant acceptedAt;
+    private String acceptedByName;
+    private Instant declinedAt;
+    private String declinedByName;
+    private String declineReason;
     private Instant createdAt;
 
     @Data

@@ -223,4 +223,54 @@ agenthire/
 ### Instructor Data Isolation Rule:
 Every instructor-facing endpoint verifies that the candidate belongs to an active `CandidateAssignment` targeting the authenticated instructor. Cross-instructor data snooping is strictly prevented at the service layer.
 
+## 8. Instructor Candidate Review, Acceptance & Interview Readiness (Phase 9)
+
+```
+[Instructor Reviews Candidate Portfolio]
+        │
+        ├── Verified Candidate intake info & academic background
+        ├── Interview Engineer priority & instructions message
+        ├── Downloadable Resume document & extraction metadata
+        └── AI-assisted resume skills, role match score & exploration points
+        │
+        ├── Option A: ACCEPT CANDIDATE
+        │       │ POST /api/instructor/assignments/{assignmentId}/accept
+        │       ▼
+        │   [Spring Boot REST API]
+        │       ├── 1. Authorize: INSTRUCTOR only (@PreAuthorize)
+        │       ├── 2. Verify Assignment ownership (belongs to authenticated Instructor)
+        │       ├── 3. Enforce status == SENT (409 Conflict if not)
+        │       ├── 4. Transactionally:
+        │       │       ├── CandidateAssignment.status = ACCEPTED
+        │       │       ├── CandidateAssignment.acceptedAt = now(), acceptedBy = instructorUser
+        │       │       ├── Candidate.status = ACCEPTED_BY_INSTRUCTOR
+        │       │       ├── Create Notification for Engineer (type = CANDIDATE_ASSIGNMENT_ACCEPTED)
+        │       │       └── Record AuditLog (action = CANDIDATE_ASSIGNMENT_ACCEPTED)
+        │       └── 5. Result: Candidate becomes READY FOR INTERVIEW CONFIGURATION
+        │
+        └── Option B: DECLINE CANDIDATE
+                │ POST /api/instructor/assignments/{assignmentId}/decline
+                │ Request: { "reason": "Mandatory evaluation rationale..." }
+                ▼
+            [Spring Boot REST API]
+                ├── 1. Authorize: INSTRUCTOR only
+                ├── 2. Verify Assignment ownership & status == SENT (409 Conflict if not)
+                ├── 3. Validate non-empty reason (400 Bad Request if missing/blank)
+                ├── 4. Transactionally:
+                │       ├── CandidateAssignment.status = DECLINED
+                │       ├── CandidateAssignment.declinedAt = now(), declinedBy = instructorUser, declineReason = reason
+                │       ├── Candidate preserved (status = VERIFIED for reassignment)
+                │       ├── Create Notification for Engineer (type = CANDIDATE_ASSIGNMENT_DECLINED)
+                │       └── Record AuditLog (action = CANDIDATE_ASSIGNMENT_DECLINED)
+                └── 5. Result: Assignment concluded as DECLINED; recruitment traceability preserved
+```
+
+### Assignment Decision Endpoints:
+- `POST /api/instructor/assignments/{id}/accept`: Transitions `SENT` -> `ACCEPTED`
+- `POST /api/instructor/assignments/{id}/decline`: Transitions `SENT` -> `DECLINED` (requires reason)
+- `GET  /api/instructor/assignments`: Paginated instructor assignment history
+- `GET  /api/instructor/assignments/{id}`: Single assignment review
+- `GET  /api/instructor/dashboard/stats`: Real-time KPI metrics (`assignedCandidates`, `pendingReview`, `accepted`, `declined`)
+
+
 

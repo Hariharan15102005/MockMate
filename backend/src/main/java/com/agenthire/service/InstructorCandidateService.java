@@ -26,6 +26,15 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.agenthire.dto.assignment.AssignmentDeclineRequest;
+import com.agenthire.dto.assignment.InstructorDashboardStatsResponse;
+import com.agenthire.entity.User;
+import com.agenthire.entity.enums.CandidateStatus;
+import com.agenthire.entity.enums.NotificationType;
+import com.agenthire.exception.InvalidStatusTransitionException;
+import com.agenthire.repository.UserRepository;
+
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -40,9 +49,174 @@ public class InstructorCandidateService {
     private final InstructorRepository instructorRepository;
     private final ResumeRepository resumeRepository;
     private final ResumeAnalysisRepository resumeAnalysisRepository;
+    private final UserRepository userRepository;
+    private final NotificationService notificationService;
+    private final AuditLogService auditLogService;
     private final EngineerAssignmentService engineerAssignmentService;
     private final EngineerResumeService engineerResumeService;
     private final EngineerCandidateService engineerCandidateService;
+
+    @Transactional
+    public CandidateAssignmentDetailResponse acceptAssignment(UUID assignmentId, UUID instructorUserId, String ipAddress) {
+        Instructor instructor = getInstructorByUserId(instructorUserId);
+        User instructorUser = userRepository.findById(instructorUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + instructorUserId));
+
+        CandidateAssignment assignment = assignmentRepository.findById(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Assignment not found with ID: " + assignmentId));
+
+        // Strict Ownership Enforcement: Must belong to this instructor
+        if (!assignment.getInstructor().getId().equals(instructor.getId())) {
+            throw new ResourceNotFoundException("Assignment does not belong to this instructor or does not exist.");
+        }
+
+        // Validate Status Transition
+        if (assignment.getStatus() != AssignmentStatus.SENT) {
+            throw new InvalidStatusTransitionException(
+                    "Cannot accept assignment with status: " + assignment.getStatus() + ". Only SENT assignments can be accepted."
+            );
+        }
+
+        // Apply transition
+        assignment.setStatus(AssignmentStatus.ACCEPTED);
+        assignment.setAcceptedAt(Instant.now());
+        assignment.setAcceptedBy(instructorUser);
+        CandidateAssignment savedAssignment = assignmentRepository.save(assignment);
+
+        Candidate candidate = assignment.getCandidate();
+        candidate.setStatus(CandidateStatus.ACCEPTED_BY_INSTRUCTOR);
+        candidateRepository.save(candidate);
+
+        log.info("Instructor {} accepted CandidateAssignment ID: {} for Candidate: {}",
+                instructor.getId(), assignment.getId(), candidate.getId());
+
+        // Notify Interview Engineer
+        notificationService.createNotification(
+                assignment.getInterviewEngineer().getUser(),
+                NotificationType.CANDIDATE_ASSIGNMENT_ACCEPTED,
+                "Candidate Assignment Accepted: " + candidate.getFullName(),
+                "Instructor " + instructorUser.getFullName() + " accepted candidate " + candidate.getFullName() +
+                        " (" + candidate.getApplicationId() + ") for " + assignment.getAppliedRole() + " review.",
+                "CandidateAssignment",
+                savedAssignment.getId()
+        );
+
+        // Audit Log
+        auditLogService.logEvent(
+                instructorUserId,
+                "CANDIDATE_ASSIGNMENT_ACCEPTED",
+                "CandidateAssignment",
+                savedAssignment.getId(),
+                "Instructor " + instructorUser.getFullName() + " accepted candidate " + candidate.getFullName() + " (Status: ACCEPTED).",
+                "{\"assignmentId\":\"" + savedAssignment.getId() + "\",\"candidateId\":\"" + candidate.getId() +
+                        "\",\"instructorId\":\"" + instructor.getId() + "\",\"previousStatus\":\"SENT\",\"newStatus\":\"ACCEPTED\"}",
+                ipAddress
+        );
+
+        return engineerAssignmentService.mapToDetailResponse(savedAssignment);
+    }
+
+    @Transactional
+    public CandidateAssignmentDetailResponse declineAssignment(
+            UUID assignmentId, AssignmentDeclineRequest request, UUID instructorUserId, String ipAddress) {
+
+        if (request.getReason() == null || request.getReason().trim().isEmpty()) {
+            throw new IllegalArgumentException("Decline reason is mandatory and cannot be empty.");
+        }
+
+        Instructor instructor = getInstructorByUserId(instructorUserId);
+        User instructorUser = userRepository.findById(instructorUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + instructorUserId));
+
+        CandidateAssignment assignment = assignmentRepository.findById(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Assignment not found with ID: " + assignmentId));
+
+        // Strict Ownership Enforcement: Must belong to this instructor
+        if (!assignment.getInstructor().getId().equals(instructor.getId())) {
+            throw new ResourceNotFoundException("Assignment does not belong to this instructor or does not exist.");
+        }
+
+        // Validate Status Transition
+        if (assignment.getStatus() != AssignmentStatus.SENT) {
+            throw new InvalidStatusTransitionException(
+                    "Cannot decline assignment with status: " + assignment.getStatus() + ". Only SENT assignments can be declined."
+            );
+        }
+
+        String sanitizedReason = request.getReason().trim();
+
+        // Apply transition
+        assignment.setStatus(AssignmentStatus.DECLINED);
+        assignment.setDeclinedAt(Instant.now());
+        assignment.setDeclinedBy(instructorUser);
+        assignment.setDeclineReason(sanitizedReason);
+        CandidateAssignment savedAssignment = assignmentRepository.save(assignment);
+
+        Candidate candidate = assignment.getCandidate();
+        candidate.setStatus(CandidateStatus.VERIFIED); // Re-enable for subsequent routing
+        candidateRepository.save(candidate);
+
+        log.info("Instructor {} declined CandidateAssignment ID: {} for Candidate: {}. Reason: {}",
+                instructor.getId(), assignment.getId(), candidate.getId(), sanitizedReason);
+
+        // Notify Interview Engineer
+        notificationService.createNotification(
+                assignment.getInterviewEngineer().getUser(),
+                NotificationType.CANDIDATE_ASSIGNMENT_DECLINED,
+                "Candidate Assignment Declined: " + candidate.getFullName(),
+                "Instructor " + instructorUser.getFullName() + " declined candidate " + candidate.getFullName() +
+                        ". Reason: " + sanitizedReason,
+                "CandidateAssignment",
+                savedAssignment.getId()
+        );
+
+        // Audit Log
+        auditLogService.logEvent(
+                instructorUserId,
+                "CANDIDATE_ASSIGNMENT_DECLINED",
+                "CandidateAssignment",
+                savedAssignment.getId(),
+                "Instructor " + instructorUser.getFullName() + " declined candidate " + candidate.getFullName() +
+                        ". Reason: " + sanitizedReason,
+                "{\"assignmentId\":\"" + savedAssignment.getId() + "\",\"candidateId\":\"" + candidate.getId() +
+                        "\",\"instructorId\":\"" + instructor.getId() + "\",\"previousStatus\":\"SENT\",\"newStatus\":\"DECLINED\",\"reason\":\"" +
+                        sanitizedReason.replace("\"", "\\\"") + "\"}",
+                ipAddress
+        );
+
+        return engineerAssignmentService.mapToDetailResponse(savedAssignment);
+    }
+
+    @Transactional(readOnly = true)
+    public CandidateAssignmentDetailResponse getAssignmentById(UUID assignmentId, UUID instructorUserId) {
+        Instructor instructor = getInstructorByUserId(instructorUserId);
+        CandidateAssignment assignment = assignmentRepository.findById(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Assignment not found with ID: " + assignmentId));
+
+        if (!assignment.getInstructor().getId().equals(instructor.getId())) {
+            throw new ResourceNotFoundException("Assignment does not belong to this instructor or does not exist.");
+        }
+
+        return engineerAssignmentService.mapToDetailResponse(assignment);
+    }
+
+    @Transactional(readOnly = true)
+    public InstructorDashboardStatsResponse getDashboardStats(UUID instructorUserId) {
+        Instructor instructor = getInstructorByUserId(instructorUserId);
+        UUID instructorId = instructor.getId();
+
+        long assignedCandidates = assignmentRepository.countByInstructorId(instructorId);
+        long pendingReview = assignmentRepository.countByInstructorIdAndStatus(instructorId, AssignmentStatus.SENT);
+        long accepted = assignmentRepository.countByInstructorIdAndStatus(instructorId, AssignmentStatus.ACCEPTED);
+        long declined = assignmentRepository.countByInstructorIdAndStatus(instructorId, AssignmentStatus.DECLINED);
+
+        return InstructorDashboardStatsResponse.builder()
+                .assignedCandidates(assignedCandidates)
+                .pendingReview(pendingReview)
+                .accepted(accepted)
+                .declined(declined)
+                .build();
+    }
 
     @Transactional(readOnly = true)
     public Page<CandidateAssignmentDetailResponse> getAssignedCandidates(

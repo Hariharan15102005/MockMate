@@ -18,6 +18,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -68,6 +70,54 @@ public class InstructorCandidateController {
 
         return ResponseEntity.ok(
                 instructorCandidateService.getAssignedCandidates(principal.getId(), search, status, pageable)
+        );
+    }
+
+    @GetMapping("/assignments/{assignmentId}")
+    @Operation(summary = "Get assignment by ID", description = "Retrieves a single candidate assignment for the authenticated instructor.")
+    public ResponseEntity<CandidateAssignmentDetailResponse> getAssignmentById(
+            @PathVariable UUID assignmentId,
+            @AuthenticationPrincipal UserPrincipal principal) {
+
+        return ResponseEntity.ok(
+                instructorCandidateService.getAssignmentById(assignmentId, principal.getId())
+        );
+    }
+
+    @PostMapping("/assignments/{assignmentId}/accept")
+    @Operation(summary = "Accept candidate assignment", description = "Accepts a candidate assignment, updating status to ACCEPTED and notifying the engineer.")
+    public ResponseEntity<CandidateAssignmentDetailResponse> acceptAssignment(
+            @PathVariable UUID assignmentId,
+            @AuthenticationPrincipal UserPrincipal principal,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
+
+        String ipAddress = httpRequest.getRemoteAddr();
+        return ResponseEntity.ok(
+                instructorCandidateService.acceptAssignment(assignmentId, principal.getId(), ipAddress)
+        );
+    }
+
+    @PostMapping("/assignments/{assignmentId}/decline")
+    @Operation(summary = "Decline candidate assignment", description = "Declines a candidate assignment with mandatory reason, updating status to DECLINED and notifying the engineer.")
+    public ResponseEntity<CandidateAssignmentDetailResponse> declineAssignment(
+            @PathVariable UUID assignmentId,
+            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody com.agenthire.dto.assignment.AssignmentDeclineRequest request,
+            @AuthenticationPrincipal UserPrincipal principal,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
+
+        String ipAddress = httpRequest.getRemoteAddr();
+        return ResponseEntity.ok(
+                instructorCandidateService.declineAssignment(assignmentId, request, principal.getId(), ipAddress)
+        );
+    }
+
+    @GetMapping("/dashboard/stats")
+    @Operation(summary = "Get instructor dashboard statistics", description = "Retrieves real metrics on assigned, pending, accepted, and declined candidates.")
+    public ResponseEntity<com.agenthire.dto.assignment.InstructorDashboardStatsResponse> getDashboardStats(
+            @AuthenticationPrincipal UserPrincipal principal) {
+
+        return ResponseEntity.ok(
+                instructorCandidateService.getDashboardStats(principal.getId())
         );
     }
 }

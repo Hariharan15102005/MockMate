@@ -37,8 +37,32 @@ export const getInstructorAssignmentsApi = async ({
   return response.data;
 };
 
+export const getInstructorAssignmentByIdApi = async (assignmentId) => {
+  const response = await client.get(`/api/instructor/assignments/${assignmentId}`);
+  return response.data;
+};
+
+export const acceptAssignmentApi = async (assignmentId) => {
+  const response = await client.post(`/api/instructor/assignments/${assignmentId}/accept`);
+  return response.data;
+};
+
+export const declineAssignmentApi = async (assignmentId, { reason }) => {
+  const response = await client.post(`/api/instructor/assignments/${assignmentId}/decline`, { reason });
+  return response.data;
+};
+
+export const getInstructorStatsApi = async () => {
+  const response = await client.get('/api/instructor/dashboard/stats');
+  return response.data;
+};
+
 export default {
   getAssignedCandidatesApi,
   getAssignedCandidateDetailApi,
-  getInstructorAssignmentsApi
+  getInstructorAssignmentsApi,
+  getInstructorAssignmentByIdApi,
+  acceptAssignmentApi,
+  declineAssignmentApi,
+  getInstructorStatsApi
 };
