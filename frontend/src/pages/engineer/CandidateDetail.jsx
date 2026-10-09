@@ -16,7 +16,9 @@ import {
   getCandidateAuditApi,
   getCandidateResumesApi,
   uploadCandidateResumeApi,
-  downloadResumeApi
+  downloadResumeApi,
+  getInstructorsApi,
+  assignCandidateToInstructorApi
 } from '../../api/engineer';
 import {
   User,
@@ -86,6 +88,17 @@ export const CandidateDetail = () => {
   const [uploadError, setUploadError] = useState(null);
   const [downloadLoadingId, setDownloadLoadingId] = useState(null);
 
+  // Send to Instructor Modal State
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [instructors, setInstructors] = useState([]);
+  const [instructorsLoading, setInstructorsLoading] = useState(false);
+  const [selectedInstructorId, setSelectedInstructorId] = useState('');
+  const [assignMessage, setAssignMessage] = useState('');
+  const [assignInterviewType, setAssignInterviewType] = useState('TECHNICAL');
+  const [assignPriority, setAssignPriority] = useState('MEDIUM');
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignError, setAssignError] = useState(null);
+
   const fetchCandidateData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -127,6 +140,67 @@ export const CandidateDetail = () => {
     fetchCandidateData();
   }, [fetchCandidateData]);
 
+  // Load Instructors when opening assignment modal
+  const openAssignModal = async () => {
+    setAssignError(null);
+    setAssignModalOpen(true);
+    setInstructorsLoading(true);
+    try {
+      const data = await getInstructorsApi({ size: 50 });
+      const list = data.content || data || [];
+      setInstructors(list);
+      if (list.length > 0 && !selectedInstructorId) {
+        setSelectedInstructorId(list[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load instructors:', err);
+      setAssignError('Failed to retrieve active instructors.');
+    } finally {
+      setInstructorsLoading(false);
+    }
+  };
+
+  const handleAssignSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedInstructorId) {
+      setAssignError('Please select an instructor.');
+      return;
+    }
+
+    setAssignLoading(true);
+    setAssignError(null);
+
+    try {
+      const response = await assignCandidateToInstructorApi(id, {
+        instructorId: selectedInstructorId,
+        message: assignMessage,
+        interviewType: assignInterviewType,
+        priority: assignPriority
+      });
+
+      setAssignModalOpen(false);
+      setAssignMessage('');
+      setActionSuccess(`Candidate successfully assigned to Instructor ${response.instructor?.fullName || ''} for review.`);
+
+      // Refresh candidate details & audit trail
+      const [updatedCandidate, updatedAudit] = await Promise.all([
+        getCandidateByIdApi(id),
+        getCandidateAuditApi(id).catch(() => [])
+      ]);
+      setCandidate(updatedCandidate);
+      setAuditLogs(updatedAudit);
+    } catch (err) {
+      console.error('Candidate assignment error:', err);
+      if (err.response?.status === 409) {
+        setAssignError(err.response?.data?.message || 'Conflict: Candidate already has an active assignment with this instructor.');
+      } else {
+        setAssignError(err.response?.data?.message || 'Failed to assign candidate to instructor.');
+      }
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
   // Handle Candidate Verification
   const handleVerifyCandidate = async () => {
     setVerifyLoading(true);
@@ -134,7 +208,7 @@ export const CandidateDetail = () => {
       const updated = await verifyCandidateApi(id);
       setCandidate(updated);
       setVerifyDialogOpen(false);
-      setActionSuccess('Candidate has been verified successfully. Resume upload is now unlocked.');
+      setActionSuccess('Candidate has been verified successfully. Resume upload and instructor routing are now unlocked.');
       // Refresh audit logs
       const updatedAudit = await getCandidateAuditApi(id).catch(() => []);
       setAuditLogs(updatedAudit);
@@ -213,7 +287,7 @@ export const CandidateDetail = () => {
       const uploadedResume = await uploadCandidateResumeApi(id, selectedFile);
       setResumeModalOpen(false);
       setSelectedFile(null);
-      setActionSuccess(`Resume '${uploadedResume.fileName}' uploaded and analyzed successfully (v${uploadedResume.version}).`);
+      setActionSuccess(`Resume '${uploadedResume.fileName}' uploaded and analyzed successfully (v${uploadedResume.version}). Candidate is now eligible for instructor routing.`);
       
       // Refresh resumes and audit logs
       const [updatedResumes, updatedAudit] = await Promise.all([
@@ -308,31 +382,37 @@ export const CandidateDetail = () => {
 
   const isPendingVerification = candidate.status === 'PENDING_VERIFICATION';
   const isVerified = candidate.status === 'VERIFIED';
+  const isSentToInstructor = candidate.status === 'SENT_TO_INSTRUCTOR';
   const isRejected = candidate.status === 'REJECTED';
 
   const currentResume = resumes.find((r) => r.isCurrent) || resumes[0];
   const historicalResumes = resumes.filter((r) => r.id !== currentResume?.id);
+  const canSendToInstructor = (isVerified || isSentToInstructor) && currentResume;
 
   const pipelineStages = [
     { name: 'Intake Created', status: 'completed', label: 'Completed' },
     {
       name: 'Verification',
-      status: isVerified ? 'completed' : isRejected ? 'failed' : 'active',
-      label: isVerified ? 'Verified' : isRejected ? 'Rejected' : 'Pending Review'
+      status: (isVerified || isSentToInstructor) ? 'completed' : isRejected ? 'failed' : 'active',
+      label: (isVerified || isSentToInstructor) ? 'Verified' : isRejected ? 'Rejected' : 'Pending Review'
     },
     {
       name: 'Resume & AI Analysis',
-      status: currentResume ? (currentResume.status === 'ANALYZED' ? 'completed' : currentResume.status === 'ANALYSIS_FAILED' ? 'failed' : 'active') : isVerified ? 'active' : 'upcoming',
-      label: currentResume ? currentResume.status.replace(/_/g, ' ') : isVerified ? 'Ready for Upload' : 'Locked'
+      status: currentResume ? (currentResume.status === 'ANALYZED' ? 'completed' : currentResume.status === 'ANALYSIS_FAILED' ? 'failed' : 'active') : (isVerified || isSentToInstructor) ? 'active' : 'upcoming',
+      label: currentResume ? currentResume.status.replace(/_/g, ' ') : (isVerified || isSentToInstructor) ? 'Ready for Upload' : 'Locked'
     },
-    { name: 'Instructor Routing', status: 'upcoming', label: 'Phase 8' },
+    {
+      name: 'Instructor Routing',
+      status: isSentToInstructor ? 'completed' : (isVerified && currentResume) ? 'active' : 'upcoming',
+      label: isSentToInstructor ? 'Routed to Instructor' : (isVerified && currentResume) ? 'Ready to Route' : 'Phase 8'
+    },
     { name: 'AI Interview', status: 'upcoming', label: 'Phase 9+' }
   ];
 
   // Map audit logs to ActivityTimeline format
   const timelineEvents = auditLogs.map((log) => {
     let type = 'default';
-    if (log.action === 'CANDIDATE_VERIFIED' || log.action === 'RESUME_ANALYSIS_COMPLETED') type = 'success';
+    if (log.action === 'CANDIDATE_VERIFIED' || log.action === 'RESUME_ANALYSIS_COMPLETED' || log.action === 'CANDIDATE_SENT_TO_INSTRUCTOR') type = 'success';
     else if (log.action === 'CANDIDATE_REJECTED' || log.action === 'RESUME_ANALYSIS_FAILED') type = 'alert';
     else if (log.action === 'RESUME_UPLOADED' || log.action === 'RESUME_ANALYSIS_STARTED') type = 'report';
     else if (log.action === 'CANDIDATE_CREATED') type = 'report';
@@ -388,9 +468,9 @@ export const CandidateDetail = () => {
               </>
             )}
 
-            {isVerified && (
+            {(isVerified || isSentToInstructor) && (
               <Button
-                variant="primary"
+                variant="outline"
                 size="sm"
                 icon={Upload}
                 onClick={() => {
@@ -399,7 +479,18 @@ export const CandidateDetail = () => {
                   setResumeModalOpen(true);
                 }}
               >
-                {currentResume ? 'Upload New Resume Version' : 'Upload Resume'}
+                {currentResume ? 'Upload New Resume' : 'Upload Resume'}
+              </Button>
+            )}
+
+            {canSendToInstructor && (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Send}
+                onClick={openAssignModal}
+              >
+                {isSentToInstructor ? 'Re-route to Instructor' : 'Send to Instructor'}
               </Button>
             )}
 
@@ -440,7 +531,35 @@ export const CandidateDetail = () => {
         </div>
       )}
 
-      {/* Verification / Rejection Status Metadata Banner */}
+      {/* SENT TO INSTRUCTOR STATUS BANNER (PHASE 8) */}
+      {isSentToInstructor && (
+        <div
+          className="card"
+          style={{
+            marginBottom: '1.5rem',
+            padding: '1.25rem',
+            background: 'rgba(99, 102, 241, 0.08)',
+            border: '1px solid rgba(99, 102, 241, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1rem'
+          }}
+        >
+          <div style={{ padding: '0.5rem', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.2)', color: 'var(--primary)' }}>
+            <UserCheck size={24} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: '700', color: 'var(--primary)', fontSize: '0.95rem' }}>
+              Candidate Routed to Instructor for Review
+            </div>
+            <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+              This candidate application package and AI resume analysis have been routed to the assigned domain instructor. You can view all tracked assignments in <Link to="/engineer/assignments" style={{ color: 'var(--primary)', fontWeight: '600', textDecoration: 'underline' }}>Assignments</Link>.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Verification Status Metadata Banner */}
       {isVerified && candidate.verifiedBy && (
         <div
           className="card"
@@ -570,13 +689,13 @@ export const CandidateDetail = () => {
         </div>
       </Card>
 
-      {/* RESUME MANAGEMENT SECTION (PHASE 7) */}
+      {/* RESUME MANAGEMENT SECTION */}
       <Card
         title="Candidate Resume & AI Analysis"
         subtitle="Resume document management, versioning, and LangGraph-powered analysis"
         style={{ marginBottom: '2rem' }}
       >
-        {!isVerified && !currentResume ? (
+        {!isVerified && !isSentToInstructor && !currentResume ? (
           <div
             style={{
               padding: '2rem',
@@ -881,6 +1000,140 @@ export const CandidateDetail = () => {
           emptyMessage="No verification history or lifecycle audit logs recorded yet."
         />
       </Card>
+
+      {/* SEND TO INSTRUCTOR MODAL (PHASE 8) */}
+      {assignModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            zIndex: 1000
+          }}
+          onClick={() => !assignLoading && setAssignModalOpen(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '560px',
+              width: '100%',
+              padding: '2rem',
+              position: 'relative'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Send size={22} color="var(--primary)" />
+                <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>
+                  Route Candidate to Instructor
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !assignLoading && setAssignModalOpen(false)}
+                style={{ color: 'var(--text-muted)', padding: '4px' }}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {assignError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                <AlertCircle size={16} />
+                <span>{assignError}</span>
+              </div>
+            )}
+
+            <div style={{ padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Candidate for Review</div>
+              <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)' }}>{candidate.fullName} ({candidate.applicationId})</div>
+              <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>Applied Role: <strong>{candidate.appliedRole}</strong> • Resume: <strong>{currentResume?.fileName || 'Attached'} (v{currentResume?.version || 1})</strong></div>
+            </div>
+
+            <form onSubmit={handleAssignSubmit}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label">Select Domain Instructor *</label>
+                {instructorsLoading ? (
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', padding: '0.5rem' }}>Loading active instructors...</div>
+                ) : (
+                  <select
+                    className="form-input"
+                    value={selectedInstructorId}
+                    onChange={(e) => setSelectedInstructorId(e.target.value)}
+                    required
+                  >
+                    <option value="" disabled>Select an instructor</option>
+                    {instructors.map((inst) => (
+                      <option key={inst.id} value={inst.id}>
+                        {inst.fullName} ({inst.email}) — {inst.specialization || inst.department || 'Evaluation Board'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <label className="form-label">Interview Type</label>
+                  <select
+                    className="form-input"
+                    value={assignInterviewType}
+                    onChange={(e) => setAssignInterviewType(e.target.value)}
+                  >
+                    <option value="TECHNICAL">TECHNICAL</option>
+                    <option value="SYSTEM_DESIGN">SYSTEM DESIGN</option>
+                    <option value="BEHAVIORAL">BEHAVIORAL</option>
+                    <option value="COMPREHENSIVE">COMPREHENSIVE</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Routing Priority</label>
+                  <select
+                    className="form-input"
+                    value={assignPriority}
+                    onChange={(e) => setAssignPriority(e.target.value)}
+                  >
+                    <option value="HIGH">HIGH</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="LOW">LOW</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Message / Notes for Instructor (Optional)</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{assignMessage.length} / 1000</span>
+                </label>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  maxLength={1000}
+                  placeholder="Provide context or highlight areas to evaluate (e.g. strong backend foundations, check distributed caching)..."
+                  value={assignMessage}
+                  onChange={(e) => setAssignMessage(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <Button variant="secondary" size="sm" type="button" onClick={() => setAssignModalOpen(false)} disabled={assignLoading}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm" type="submit" icon={Send} loading={assignLoading} disabled={assignLoading || !selectedInstructorId}>
+                  {assignLoading ? 'Routing...' : 'Confirm & Route'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* RESUME UPLOAD MODAL */}
       {resumeModalOpen && (

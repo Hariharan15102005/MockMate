@@ -130,6 +130,49 @@ export const downloadResumeApi = async (resumeId, fileName = 'resume.pdf') => {
   window.URL.revokeObjectURL(downloadUrl);
 };
 
+// ==========================================
+// CANDIDATE ASSIGNMENT & INSTRUCTOR APIS
+// ==========================================
+
+export const getInstructorsApi = async ({ search = '', page = 0, size = 20 } = {}) => {
+  const params = { page, size };
+  if (search && search.trim()) params.search = search.trim();
+
+  const response = await client.get('/api/engineer/instructors', { params });
+  return response.data;
+};
+
+export const assignCandidateToInstructorApi = async (candidateId, { instructorId, message, interviewType = 'TECHNICAL', priority = 'MEDIUM' }) => {
+  const response = await client.post(`/api/engineer/candidates/${candidateId}/assign`, {
+    instructorId,
+    message,
+    interviewType,
+    priority
+  });
+  return response.data;
+};
+
+export const getAssignmentsApi = async ({
+  page = 0,
+  size = 15,
+  search = '',
+  status = '',
+  instructorId = ''
+} = {}) => {
+  const params = { page, size };
+  if (search && search.trim()) params.search = search.trim();
+  if (status && status.trim()) params.status = status.trim();
+  if (instructorId && instructorId.trim()) params.instructorId = instructorId.trim();
+
+  const response = await client.get('/api/engineer/assignments', { params });
+  return response.data;
+};
+
+export const getAssignmentByIdApi = async (assignmentId) => {
+  const response = await client.get(`/api/engineer/assignments/${assignmentId}`);
+  return response.data;
+};
+
 export default {
   createCandidateApi,
   getCandidatesApi,
@@ -145,5 +188,10 @@ export default {
   getCurrentCandidateResumeApi,
   getResumeByIdApi,
   getResumeAnalysisApi,
-  downloadResumeApi
+  downloadResumeApi,
+  getInstructorsApi,
+  assignCandidateToInstructorApi,
+  getAssignmentsApi,
+  getAssignmentByIdApi
 };
+

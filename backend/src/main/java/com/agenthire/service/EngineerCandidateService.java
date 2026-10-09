@@ -277,7 +277,8 @@ public class EngineerCandidateService {
                 .build();
     }
 
-    private CandidateResponse mapToResponse(Candidate candidate) {
+    public CandidateResponse mapToResponse(Candidate candidate) {
+
         UserSummaryResponse verifiedBySummary = candidate.getVerifiedBy() != null
                 ? UserSummaryResponse.builder()
                 .id(candidate.getVerifiedBy().getId())

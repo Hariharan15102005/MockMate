@@ -47,6 +47,7 @@ import EngineerProfile from './pages/engineer/Profile';
 // Instructor Pages
 import InstructorDashboard from './pages/instructor/Dashboard';
 import InstructorCandidates from './pages/instructor/Candidates';
+import InstructorCandidateDetail from './pages/instructor/CandidateDetail';
 import PendingCandidates from './pages/instructor/PendingCandidates';
 import InstructorInterviews from './pages/instructor/Interviews';
 import InterviewBuilder from './pages/instructor/InterviewBuilder';
@@ -191,6 +192,7 @@ export const App = () => {
                     <Routes>
                       <Route path="dashboard" element={<InstructorDashboard />} />
                       <Route path="candidates" element={<InstructorCandidates />} />
+                      <Route path="candidates/:id" element={<InstructorCandidateDetail />} />
                       <Route path="candidates/pending" element={<PendingCandidates />} />
                       <Route path="interviews" element={<InstructorInterviews />} />
                       <Route path="interviews/builder" element={<InterviewBuilder />} />

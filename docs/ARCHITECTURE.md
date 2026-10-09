@@ -171,3 +171,56 @@ agenthire/
         └── Error Fallback: On AI timeout/failure -> Resume status = ANALYSIS_FAILED, Candidate preserved
 ```
 
+## 7. Interview Engineer → Instructor Candidate Assignment & Routing (Phase 8)
+
+```
+[Interview Engineer]
+        │
+        │ POST /api/engineer/candidates/{candidateId}/assign
+        │ Request: { instructorId, message, track, priority }
+        ▼
+[Spring Boot REST API]
+        │
+        ├── 1. Authorize: INTERVIEW_ENGINEER only (@PreAuthorize)
+        ├── 2. Authenticate Engineer: Bound via SecurityContext (JWT -> UserPrincipal -> InterviewEngineer)
+        ├── 3. Validate Candidate:
+        │       ├── Candidate must exist
+        │       ├── Candidate.status == VERIFIED (409 Conflict if not)
+        │       └── Candidate must have at least one uploaded Resume (409 Conflict if missing)
+        ├── 4. Validate Instructor:
+        │       ├── Instructor user must exist and have Role == INSTRUCTOR
+        │       └── Instructor account must be active == true (400 Bad Request if invalid)
+        ├── 5. Duplicate Protection:
+        │       └── Active assignment check (SENT/PENDING/ACCEPTED) -> 409 Conflict if duplicate
+        │
+        ├── 6. Atomically Execute within Transaction:
+        │       ├── Create CandidateAssignment (status = SENT, track = TECHNICAL, priority)
+        │       ├── Update Candidate (status = SENT_TO_INSTRUCTOR)
+        │       ├── Dispatch Notification to Instructor (type = CANDIDATE_ASSIGNED)
+        │       └── Record AuditLog (action = CANDIDATE_SENT_TO_INSTRUCTOR)
+        │
+        │ HTTP 201 Created (CandidateAssignmentDetailResponse)
+        ▼
+[Instructor Portal]
+        │
+        ├── Real-time Notification Bell: Unread count badge & review alert
+        ├── GET /api/instructor/candidates: Filtered list of assignments for authenticated instructor
+        └── GET /api/instructor/candidates/{candidateId}: Complete candidate dossier with:
+                ├── Verified Candidate details & contact metadata
+                ├── Engineer routing instructions & priority
+                ├── Resume download link & extraction metadata
+                └── AI Resume Analysis (skills, match score, summary, discovery areas)
+                [Strict Isolation: 404 Not Found if assigned to another instructor]
+```
+
+### Assignment State Machine:
+- `PENDING` -> Initial draft / queued state
+- `SENT` -> Active assignment dispatched by Interview Engineer to Instructor (Phase 8)
+- `ACCEPTED` -> Instructor accepted assignment (Phase 9)
+- `DECLINED` -> Instructor declined assignment (Phase 9)
+- `COMPLETED` -> Candidate interview cycle concluded
+
+### Instructor Data Isolation Rule:
+Every instructor-facing endpoint verifies that the candidate belongs to an active `CandidateAssignment` targeting the authenticated instructor. Cross-instructor data snooping is strictly prevented at the service layer.
+
+

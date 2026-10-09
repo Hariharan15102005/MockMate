@@ -14,4 +14,6 @@ public interface ResumeRepository extends JpaRepository<Resume, UUID> {
     List<Resume> findByCandidateIdOrderByVersionDesc(UUID candidateId);
     Optional<Resume> findByCandidateIdAndIsCurrentTrue(UUID candidateId);
     Optional<Resume> findTopByCandidateIdOrderByVersionDesc(UUID candidateId);
+    boolean existsByCandidateId(UUID candidateId);
 }
+
