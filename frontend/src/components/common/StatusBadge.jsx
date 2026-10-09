@@ -83,6 +83,16 @@ export const StatusBadge = ({ status, size = 'md' }) => {
       label: 'Inactive',
       variant: 'default',
       icon: XCircle
+    },
+    DRAFT: {
+      label: 'Draft Blueprint',
+      variant: 'warning',
+      icon: FileText
+    },
+    PUBLISHED: {
+      label: 'Published Blueprint',
+      variant: 'success',
+      icon: CheckCircle2
     }
   };
 

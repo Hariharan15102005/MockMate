@@ -66,6 +66,19 @@ public class Question extends BaseEntity {
     @Column(name = "is_ai_generated", nullable = false)
     private Boolean isAiGenerated = false;
 
+    @Column(name = "sequence_number")
+    @Builder.Default
+    private Integer sequenceNumber = 1;
+
+    @Column(name = "coding_language", length = 50)
+    private String codingLanguage;
+
+    @Column(name = "sample_input", columnDefinition = "TEXT")
+    private String sampleInput;
+
+    @Column(name = "sample_output", columnDefinition = "TEXT")
+    private String sampleOutput;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by")
     private User createdBy;

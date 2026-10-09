@@ -69,6 +69,14 @@ public class InterviewRound extends BaseEntity {
     @Builder.Default
     private Difficulty difficulty = Difficulty.MEDIUM;
 
+    @Column(name = "question_count")
+    @Builder.Default
+    private Integer questionCount = 1;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "question_type", length = 40)
+    private com.agenthire.entity.enums.QuestionType questionType;
+
     @Column(name = "weight")
     private Integer weight;
 

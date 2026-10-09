@@ -38,7 +38,8 @@ import {
   XCircle,
   X,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Sliders
 } from 'lucide-react';
 
 export const InstructorCandidateDetail = () => {
@@ -222,6 +223,16 @@ export const InstructorCandidateDetail = () => {
             >
               <CheckCircle2 size={15} style={{ marginRight: '0.35rem' }} /> Accept Candidate
             </Button>
+          </div>
+        )}
+
+        {detail?.assignment?.status === 'ACCEPTED' && (
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <Link to={`/instructor/interviews/builder?assignmentId=${detail.assignment.id}&candidateId=${detail.candidate?.id}`}>
+              <Button variant="primary" size="sm" icon={Sliders}>
+                Configure Interview Blueprint
+              </Button>
+            </Link>
           </div>
         )}
       </div>

@@ -80,6 +80,18 @@ public class Interview extends BaseEntity {
     @JoinColumn(name = "created_by", nullable = false)
     private Instructor createdBy;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "candidate_id")
+    private Candidate candidate;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "candidate_assignment_id")
+    private CandidateAssignment candidateAssignment;
+
+    @Column(name = "is_adaptive", nullable = false)
+    @Builder.Default
+    private Boolean isAdaptive = false;
+
     @Column(name = "published_at")
     private Instant publishedAt;
 }

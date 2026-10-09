@@ -272,5 +272,64 @@ Every instructor-facing endpoint verifies that the candidate belongs to an activ
 - `GET  /api/instructor/assignments/{id}`: Single assignment review
 - `GET  /api/instructor/dashboard/stats`: Real-time KPI metrics (`assignedCandidates`, `pendingReview`, `accepted`, `declined`)
 
+## 9. Instructor Interview Builder & Interview Configuration (Phase 10)
+
+```
+[Accepted Candidate Assignment] (status = ACCEPTED)
+         │
+         ▼
+[Instructor Portal: Interview Builder]
+         │
+         ├── 1. Configure Basic Information:
+         │       ├── Title, Target Role, Duration (mins), Experience Level, Difficulty
+         │       ├── Adaptive questioning flag (Phase 12 execution hook)
+         │       └── Overall instructions & objectives
+         │
+         ├── 2. Configure Assessment Rounds:
+         │       ├── Supported Types: INTRODUCTION, RESUME, TECHNICAL, CODING, SQL, SYSTEM_DESIGN, LEARNING, BEHAVIORAL, CLOSING
+         │       ├── Deterministic ordering (sequenceNumber: 1..N)
+         │       ├── Durations, target question counts, question types, round instructions
+         │       └── Round reordering & validation (unique sequence numbers, positive durations)
+         │
+         ├── 3. Configure Static / Manual Question Bank:
+         │       ├── Bound to specific round & sequence number
+         │       ├── Question prompt, question type, difficulty, expected answer guidance
+         │       └── Coding / SQL extensions: language, sample inputs, sample outputs
+         │
+         ├── 4. Configure Scoring Rubric (InterviewScoringConfig):
+         │       ├── Category percentage weights: Technical, Coding, SQL, System Design, Problem Solving, Communication, Learning, Behavioral
+         │       ├── Passing score threshold (percentage)
+         │       └── Validation: Sum of weights must equal exactly 100%
+         │
+         ├── Option A: SAVE DRAFT
+         │       │ POST /api/instructor/interviews (Create draft)
+         │       │ PUT  /api/instructor/interviews/{id} (Update draft)
+         │       ▼
+         │   [Spring Boot REST API]
+         │       ├── Validates instructor ownership of CandidateAssignment (status == ACCEPTED)
+         │       ├── Verifies interview status == DRAFT (409 Conflict if already PUBLISHED)
+         │       ├── Transactionally persists/updates Interview, InterviewRounds, Questions & ScoringConfig
+         │       └── AuditLog: INTERVIEW_CREATED or INTERVIEW_UPDATED
+         │
+         └── Option B: PUBLISH BLUEPRINT
+                 │ POST /api/instructor/interviews/{id}/publish
+                 ▼
+             [Spring Boot REST API]
+                 ├── Full validation: >= 1 round, valid round order & durations, scoring weights total == 100%
+                 ├── Transitions status: DRAFT -> PUBLISHED
+                 ├── Immutability Lock: Published blueprints reject further modification (409 Conflict)
+                 ├── Prepares interview for Phase 11 Scheduling & Live Session execution
+                 └── AuditLog: INTERVIEW_PUBLISHED
+```
+
+### Phase 10 API Endpoints:
+- `POST /api/instructor/interviews`: Create a new interview blueprint draft
+- `GET  /api/instructor/interviews`: List interview blueprints for authenticated instructor (with search & status filters)
+- `GET  /api/instructor/interviews/{id}`: Retrieve full interview blueprint with rounds, questions, and scoring configuration
+- `GET  /api/instructor/interviews/candidates/accepted`: Get list of candidates with accepted assignments ready for interview creation
+- `PUT  /api/instructor/interviews/{id}`: Update an existing draft blueprint (fails with 409 if published)
+- `POST /api/instructor/interviews/{id}/publish`: Validate and publish blueprint, rendering it immutable
+
+
 
 
