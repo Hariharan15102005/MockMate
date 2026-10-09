@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useSearchParams, useParams, useNavigate, Link } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import Card from '../../components/common/Card';
 import Button from '../../components/common/Button';
@@ -68,9 +68,10 @@ const CODING_LANGUAGES = ['Java', 'Python', 'JavaScript', 'TypeScript', 'Go', 'C
 
 export const InterviewBuilder = () => {
   const [searchParams] = useSearchParams();
+  const { id: routeId } = useParams();
   const navigate = useNavigate();
 
-  const interviewIdParam = searchParams.get('interviewId');
+  const interviewIdParam = (routeId && routeId !== 'new' && routeId !== 'builder') ? routeId : searchParams.get('interviewId');
   const assignmentIdParam = searchParams.get('assignmentId');
   const candidateIdParam = searchParams.get('candidateId');
 

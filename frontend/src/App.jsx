@@ -195,7 +195,10 @@ export const App = () => {
                       <Route path="candidates/:id" element={<InstructorCandidateDetail />} />
                       <Route path="candidates/pending" element={<PendingCandidates />} />
                       <Route path="interviews" element={<InstructorInterviews />} />
+                      <Route path="interviews/new" element={<InterviewBuilder />} />
                       <Route path="interviews/builder" element={<InterviewBuilder />} />
+                      <Route path="interviews/:id" element={<InterviewBuilder />} />
+                      <Route path="interviews/:id/edit" element={<InterviewBuilder />} />
                       <Route path="interviews/scheduled" element={<InstructorScheduled />} />
                       <Route path="interviews/in-progress" element={<InstructorInProgress />} />
                       <Route path="interviews/completed" element={<InstructorCompleted />} />
