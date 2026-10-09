@@ -13,7 +13,11 @@ import {
   Check
 } from 'lucide-react';
 
+import { useAuth } from '../auth/AuthContext';
+
 export const Landing = () => {
+  const { isAuthenticated, getRoleDashboardPath } = useAuth();
+
   return (
     <div className="main-content">
       {/* Hero */}
@@ -59,15 +63,23 @@ export const Landing = () => {
         </p>
 
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <Link to="/health-test" className="btn btn-primary" style={{ padding: '0.85rem 1.75rem', fontSize: '1rem' }}>
-            <span>Launch Health Diagnostics</span>
-            <ArrowRight size={18} />
+          {isAuthenticated ? (
+            <Link to={getRoleDashboardPath()} className="btn btn-primary" style={{ padding: '0.85rem 1.75rem', fontSize: '1rem' }}>
+              <span>Go to My Dashboard</span>
+              <ArrowRight size={18} />
+            </Link>
+          ) : (
+            <Link to="/login" className="btn btn-primary" style={{ padding: '0.85rem 1.75rem', fontSize: '1rem' }}>
+              <span>Sign In to Platform</span>
+              <ArrowRight size={18} />
+            </Link>
+          )}
+          <Link to="/health-test" className="btn btn-secondary" style={{ padding: '0.85rem 1.75rem', fontSize: '1rem' }}>
+            <span>System Health Monitor</span>
           </Link>
-          <a href="http://localhost:8080/swagger-ui/index.html" target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ padding: '0.85rem 1.75rem', fontSize: '1rem' }}>
-            <span>Spring Boot Swagger Docs</span>
-          </a>
         </div>
       </div>
+
 
       {/* Business Workflow */}
       <div className="card mt-2 mb-4">
