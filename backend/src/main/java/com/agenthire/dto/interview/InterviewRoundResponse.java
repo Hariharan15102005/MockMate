@@ -33,4 +33,8 @@ public class InterviewRoundResponse {
 
     @Builder.Default
     private List<QuestionResponse> questions = new ArrayList<>();
+
+    public String getRoundName() {
+        return this.name;
+    }
 }

@@ -30,6 +30,16 @@ public class InterviewRoundRequest {
     @Size(max = 100, message = "Round name cannot exceed 100 characters")
     private String name;
 
+    public void setRoundName(String roundName) {
+        if (this.name == null || this.name.isBlank()) {
+            this.name = roundName;
+        }
+    }
+
+    public String getRoundName() {
+        return this.name;
+    }
+
     @NotNull(message = "Sequence number is required")
     @Min(value = 1, message = "Sequence number must be at least 1")
     private Integer sequenceNumber;

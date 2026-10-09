@@ -228,7 +228,10 @@ export const InterviewBuilder = () => {
         }
 
         if (interviewData.rounds && interviewData.rounds.length > 0) {
-          setRounds(interviewData.rounds);
+          setRounds(interviewData.rounds.map((r, i) => ({
+            ...r,
+            roundName: r.name || r.roundName || `Round ${i + 1}`
+          })));
         }
 
         if (interviewData.scoringConfig) {
@@ -454,7 +457,8 @@ export const InterviewBuilder = () => {
       difficulty,
       isAdaptive,
       rounds: rounds.map((r, i) => ({
-        roundName: r.roundName.trim(),
+        name: (r.roundName || r.name || `Round ${i + 1}`).trim(),
+        roundName: (r.roundName || r.name || `Round ${i + 1}`).trim(),
         roundType: r.roundType,
         sequenceNumber: i + 1,
         durationMinutes: parseInt(r.durationMinutes, 10) || 20,
