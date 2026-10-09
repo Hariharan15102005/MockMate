@@ -94,8 +94,28 @@ public class EngineerResumeWorkflowTest {
     private String candidateToken;
     private User engineerUser;
 
+    @Autowired
+    private com.agenthire.repository.CandidateAssignmentRepository candidateAssignmentRepository;
+
+    @Autowired
+    private com.agenthire.repository.InterviewRepository interviewRepository;
+
+    @Autowired
+    private com.agenthire.repository.InterviewRoundRepository roundRepository;
+
+    @Autowired
+    private com.agenthire.repository.QuestionRepository questionRepository;
+
+    @Autowired
+    private com.agenthire.repository.InterviewScoringConfigRepository scoringConfigRepository;
+
     @BeforeEach
     void setUp() {
+        scoringConfigRepository.deleteAll();
+        questionRepository.deleteAll();
+        roundRepository.deleteAll();
+        interviewRepository.deleteAll();
+        candidateAssignmentRepository.deleteAll();
         resumeAnalysisRepository.deleteAll();
         resumeRepository.deleteAll();
         candidateRepository.deleteAll();

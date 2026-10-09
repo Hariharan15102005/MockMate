@@ -10,5 +10,6 @@ import java.util.UUID;
 @Repository
 public interface QuestionRepository extends JpaRepository<Question, UUID> {
     List<Question> findByInterviewId(UUID interviewId);
+    List<Question> findByInterviewIdOrderBySequenceNumberAsc(UUID interviewId);
     List<Question> findByRoundId(UUID roundId);
 }
