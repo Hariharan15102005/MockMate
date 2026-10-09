@@ -13,7 +13,10 @@ import {
   updateCandidateApi,
   verifyCandidateApi,
   rejectCandidateApi,
-  getCandidateAuditApi
+  getCandidateAuditApi,
+  getCandidateResumesApi,
+  uploadCandidateResumeApi,
+  downloadResumeApi
 } from '../../api/engineer';
 import {
   User,
@@ -38,7 +41,15 @@ import {
   AlertCircle,
   ShieldCheck,
   UserCheck,
-  History
+  History,
+  Upload,
+  Download,
+  Brain,
+  Sparkles,
+  FileCode,
+  Layers,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 
 export const CandidateDetail = () => {
@@ -47,6 +58,7 @@ export const CandidateDetail = () => {
 
   const [candidate, setCandidate] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [resumes, setResumes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
@@ -67,17 +79,26 @@ export const CandidateDetail = () => {
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState(null);
 
+  // Resume Upload Modal State
+  const [resumeModalOpen, setResumeModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const [downloadLoadingId, setDownloadLoadingId] = useState(null);
+
   const fetchCandidateData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [candidateData, auditData] = await Promise.all([
+      const [candidateData, auditData, resumeList] = await Promise.all([
         getCandidateByIdApi(id),
-        getCandidateAuditApi(id).catch(() => [])
+        getCandidateAuditApi(id).catch(() => []),
+        getCandidateResumesApi(id).catch(() => [])
       ]);
 
       setCandidate(candidateData);
       setAuditLogs(auditData || []);
+      setResumes(resumeList || []);
       setEditFormData({
         fullName: candidateData.fullName,
         email: candidateData.email,
@@ -113,7 +134,7 @@ export const CandidateDetail = () => {
       const updated = await verifyCandidateApi(id);
       setCandidate(updated);
       setVerifyDialogOpen(false);
-      setActionSuccess('Candidate has been verified successfully. Intake review complete.');
+      setActionSuccess('Candidate has been verified successfully. Resume upload is now unlocked.');
       // Refresh audit logs
       const updatedAudit = await getCandidateAuditApi(id).catch(() => []);
       setAuditLogs(updatedAudit);
@@ -153,6 +174,74 @@ export const CandidateDetail = () => {
     }
   };
 
+  // Handle Resume Upload
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    setUploadError(null);
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    if (extension !== 'pdf' && extension !== 'docx') {
+      setUploadError('Invalid format. Only PDF and DOCX files are supported.');
+      setSelectedFile(null);
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('File size exceeds the 10 MB limit.');
+      setSelectedFile(null);
+      return;
+    }
+
+    setSelectedFile(file);
+  };
+
+  const handleResumeUploadSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      setUploadError('Please select a PDF or DOCX file to upload.');
+      return;
+    }
+
+    setUploadLoading(true);
+    setUploadError(null);
+
+    try {
+      const uploadedResume = await uploadCandidateResumeApi(id, selectedFile);
+      setResumeModalOpen(false);
+      setSelectedFile(null);
+      setActionSuccess(`Resume '${uploadedResume.fileName}' uploaded and analyzed successfully (v${uploadedResume.version}).`);
+      
+      // Refresh resumes and audit logs
+      const [updatedResumes, updatedAudit] = await Promise.all([
+        getCandidateResumesApi(id),
+        getCandidateAuditApi(id)
+      ]);
+      setResumes(updatedResumes || []);
+      setAuditLogs(updatedAudit || []);
+    } catch (err) {
+      console.error('Resume upload error:', err);
+      setUploadError(err.response?.data?.message || 'Failed to upload and analyze resume.');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+  const handleDownloadResume = async (resumeItem) => {
+    setDownloadLoadingId(resumeItem.id);
+    try {
+      await downloadResumeApi(resumeItem.id, resumeItem.fileName);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('Failed to download resume file.');
+    } finally {
+      setDownloadLoadingId(null);
+    }
+  };
+
   const handleEditChange = (e) => {
     const { name, value } = e.target;
     setEditFormData((prev) => ({ ...prev, [name]: value }));
@@ -189,6 +278,14 @@ export const CandidateDetail = () => {
     }
   };
 
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   if (loading) {
     return (
       <div>
@@ -213,6 +310,9 @@ export const CandidateDetail = () => {
   const isVerified = candidate.status === 'VERIFIED';
   const isRejected = candidate.status === 'REJECTED';
 
+  const currentResume = resumes.find((r) => r.isCurrent) || resumes[0];
+  const historicalResumes = resumes.filter((r) => r.id !== currentResume?.id);
+
   const pipelineStages = [
     { name: 'Intake Created', status: 'completed', label: 'Completed' },
     {
@@ -220,16 +320,21 @@ export const CandidateDetail = () => {
       status: isVerified ? 'completed' : isRejected ? 'failed' : 'active',
       label: isVerified ? 'Verified' : isRejected ? 'Rejected' : 'Pending Review'
     },
+    {
+      name: 'Resume & AI Analysis',
+      status: currentResume ? (currentResume.status === 'ANALYZED' ? 'completed' : currentResume.status === 'ANALYSIS_FAILED' ? 'failed' : 'active') : isVerified ? 'active' : 'upcoming',
+      label: currentResume ? currentResume.status.replace(/_/g, ' ') : isVerified ? 'Ready for Upload' : 'Locked'
+    },
     { name: 'Instructor Routing', status: 'upcoming', label: 'Phase 8' },
-    { name: 'AI Interview', status: 'upcoming', label: 'Phase 9+' },
-    { name: 'Evaluation Report', status: 'upcoming', label: 'Phase 10+' }
+    { name: 'AI Interview', status: 'upcoming', label: 'Phase 9+' }
   ];
 
   // Map audit logs to ActivityTimeline format
   const timelineEvents = auditLogs.map((log) => {
     let type = 'default';
-    if (log.action === 'CANDIDATE_VERIFIED') type = 'success';
-    else if (log.action === 'CANDIDATE_REJECTED') type = 'alert';
+    if (log.action === 'CANDIDATE_VERIFIED' || log.action === 'RESUME_ANALYSIS_COMPLETED') type = 'success';
+    else if (log.action === 'CANDIDATE_REJECTED' || log.action === 'RESUME_ANALYSIS_FAILED') type = 'alert';
+    else if (log.action === 'RESUME_UPLOADED' || log.action === 'RESUME_ANALYSIS_STARTED') type = 'report';
     else if (log.action === 'CANDIDATE_CREATED') type = 'report';
 
     const actorName = log.actor?.fullName || 'System User';
@@ -281,6 +386,21 @@ export const CandidateDetail = () => {
                   Reject Candidate
                 </Button>
               </>
+            )}
+
+            {isVerified && (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Upload}
+                onClick={() => {
+                  setSelectedFile(null);
+                  setUploadError(null);
+                  setResumeModalOpen(true);
+                }}
+              >
+                {currentResume ? 'Upload New Resume Version' : 'Upload Resume'}
+              </Button>
             )}
 
             <Button variant="secondary" size="sm" icon={Edit} onClick={() => setIsEditing(true)}>
@@ -450,6 +570,202 @@ export const CandidateDetail = () => {
         </div>
       </Card>
 
+      {/* RESUME MANAGEMENT SECTION (PHASE 7) */}
+      <Card
+        title="Candidate Resume & AI Analysis"
+        subtitle="Resume document management, versioning, and LangGraph-powered analysis"
+        style={{ marginBottom: '2rem' }}
+      >
+        {!isVerified && !currentResume ? (
+          <div
+            style={{
+              padding: '2rem',
+              textAlign: 'center',
+              border: '1px dashed var(--border-color)',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(255, 255, 255, 0.01)'
+            }}
+          >
+            <FileText size={36} color="var(--text-muted)" style={{ margin: '0 auto 0.75rem' }} />
+            <div style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
+              Resume Upload Locked
+            </div>
+            <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', maxWidth: '400px', margin: '0.35rem auto 0' }}>
+              Candidate must be <strong>VERIFIED</strong> before a resume can be uploaded and processed for AI analysis.
+            </p>
+          </div>
+        ) : !currentResume ? (
+          <div
+            style={{
+              padding: '2.5rem 1.5rem',
+              textAlign: 'center',
+              border: '1px dashed var(--border-color)',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(99, 102, 241, 0.02)'
+            }}
+          >
+            <FileText size={42} color="var(--primary)" style={{ margin: '0 auto 1rem' }} />
+            <div style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+              No Resume Uploaded
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxWidth: '450px', margin: '0.5rem auto 1.25rem' }}>
+              Upload the candidate's PDF or DOCX resume document to extract structured skill profiles, experience timelines, and AI role relevance.
+            </p>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Upload}
+              onClick={() => {
+                setSelectedFile(null);
+                setUploadError(null);
+                setResumeModalOpen(true);
+              }}
+            >
+              Upload Candidate Resume
+            </Button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Active Resume Card */}
+            <div
+              style={{
+                padding: '1.25rem 1.5rem',
+                borderRadius: 'var(--radius-md)',
+                background: 'rgba(99, 102, 241, 0.05)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div
+                  style={{
+                    padding: '0.75rem',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(99, 102, 241, 0.15)',
+                    color: 'var(--primary)'
+                  }}
+                >
+                  <FileText size={28} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                      {currentResume.fileName}
+                    </span>
+                    <span
+                      style={{
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'rgba(99, 102, 241, 0.2)',
+                        color: 'var(--primary)',
+                        fontSize: '0.725rem',
+                        fontWeight: '700'
+                      }}
+                    >
+                      v{currentResume.version} (Active)
+                    </span>
+                    <StatusBadge status={currentResume.status} />
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    Uploaded {currentResume.uploadedAt ? new Date(currentResume.uploadedAt).toLocaleString() : '—'} • {formatFileSize(currentResume.fileSize)} • By {currentResume.uploadedBy?.fullName || 'Interview Engineer'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                {currentResume.status === 'ANALYZED' && (
+                  <Link to={`/engineer/resumes/${currentResume.id}/analysis`}>
+                    <Button variant="primary" size="sm" icon={Brain}>
+                      View Analysis
+                    </Button>
+                  </Link>
+                )}
+
+                {currentResume.status === 'PROCESSING' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--warning)', fontSize: '0.85rem' }}>
+                    <Clock size={16} />
+                    <span>Analyzing resume...</span>
+                  </div>
+                )}
+
+                {currentResume.status === 'ANALYSIS_FAILED' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--danger)', fontSize: '0.85rem' }}>
+                    <AlertTriangle size={16} />
+                    <span>Analysis Failed</span>
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={Download}
+                  loading={downloadLoadingId === currentResume.id}
+                  onClick={() => handleDownloadResume(currentResume)}
+                >
+                  Download
+                </Button>
+              </div>
+            </div>
+
+            {/* Historical Resumes (if > 1) */}
+            {historicalResumes.length > 0 && (
+              <div>
+                <div style={{ fontSize: '0.8rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                  Previous Resume Versions ({historicalResumes.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {historicalResumes.map((hist) => (
+                    <div
+                      key={hist.id}
+                      style={{
+                        padding: '0.75rem 1rem',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid var(--border-color)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <FileText size={16} color="var(--text-muted)" />
+                        <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{hist.fileName}</span>
+                        <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>v{hist.version}</span>
+                        <StatusBadge status={hist.status} />
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {hist.uploadedAt ? new Date(hist.uploadedAt).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {hist.status === 'ANALYZED' && (
+                          <Link to={`/engineer/resumes/${hist.id}/analysis`}>
+                            <Button variant="ghost" size="sm">Analysis</Button>
+                          </Link>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={Download}
+                          loading={downloadLoadingId === hist.id}
+                          onClick={() => handleDownloadResume(hist)}
+                        >
+                          Download
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
       {/* Detail Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
         {/* Personal Details */}
@@ -565,6 +881,132 @@ export const CandidateDetail = () => {
           emptyMessage="No verification history or lifecycle audit logs recorded yet."
         />
       </Card>
+
+      {/* RESUME UPLOAD MODAL */}
+      {resumeModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            zIndex: 1000
+          }}
+          onClick={() => !uploadLoading && setResumeModalOpen(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '520px',
+              width: '100%',
+              padding: '2rem',
+              position: 'relative'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Upload size={22} color="var(--primary)" />
+                <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>
+                  {currentResume ? 'Upload New Resume Version' : 'Upload Candidate Resume'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !uploadLoading && setResumeModalOpen(false)}
+                style={{ color: 'var(--text-muted)', padding: '4px' }}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {uploadError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                <AlertCircle size={16} />
+                <span>{uploadError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleResumeUploadSubmit}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label">Select Resume File *</label>
+                <div
+                  style={{
+                    border: '2px dashed var(--border-color)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '1.5rem',
+                    textAlign: 'center',
+                    background: selectedFile ? 'rgba(99, 102, 241, 0.05)' : 'rgba(255, 255, 255, 0.01)',
+                    borderColor: selectedFile ? 'var(--primary)' : 'var(--border-color)',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => document.getElementById('resume-file-input')?.click()}
+                >
+                  <input
+                    id="resume-file-input"
+                    type="file"
+                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                    disabled={uploadLoading}
+                  />
+
+                  {selectedFile ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
+                      <FileText size={32} color="var(--primary)" />
+                      <span style={{ fontWeight: '700', color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+                        {selectedFile.name}
+                      </span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {formatFileSize(selectedFile.size)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
+                      <Upload size={32} color="var(--text-muted)" />
+                      <span style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                        Click to browse file
+                      </span>
+                      <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
+                        Supported formats: PDF, DOCX (Max 10 MB)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(99, 102, 241, 0.06)',
+                  border: '1px solid rgba(99, 102, 241, 0.15)',
+                  fontSize: '0.775rem',
+                  color: 'var(--text-secondary)',
+                  marginBottom: '1.5rem',
+                  lineHeight: 1.4
+                }}
+              >
+                Upon upload, text is extracted server-side and automatically processed by the LangGraph AI Service for structured skill and experience extraction.
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <Button variant="secondary" size="sm" type="button" onClick={() => setResumeModalOpen(false)} disabled={uploadLoading}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm" type="submit" loading={uploadLoading} disabled={uploadLoading || !selectedFile}>
+                  {uploadLoading ? 'Uploading & Analyzing...' : 'Upload & Analyze'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* VERIFICATION CONFIRMATION DIALOG */}
       <ConfirmDialog

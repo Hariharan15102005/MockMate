@@ -1,7 +1,7 @@
 import client from './client';
 
 /**
- * Interview Engineer Candidate Management & Verification API Client
+ * Interview Engineer Candidate Management, Verification & Resume API Client
  */
 
 export const createCandidateApi = async (candidateData) => {
@@ -77,6 +77,59 @@ export const getEngineerDashboardStatsApi = async () => {
   return response.data;
 };
 
+// ==========================================
+// RESUME MANAGEMENT & AI ANALYSIS APIS
+// ==========================================
+
+export const uploadCandidateResumeApi = async (candidateId, file, onUploadProgress) => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await client.post(`/api/engineer/candidates/${candidateId}/resume`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    onUploadProgress
+  });
+  return response.data;
+};
+
+export const getCandidateResumesApi = async (candidateId) => {
+  const response = await client.get(`/api/engineer/candidates/${candidateId}/resumes`);
+  return response.data;
+};
+
+export const getCurrentCandidateResumeApi = async (candidateId) => {
+  const response = await client.get(`/api/engineer/candidates/${candidateId}/resume/current`);
+  return response.data;
+};
+
+export const getResumeByIdApi = async (resumeId) => {
+  const response = await client.get(`/api/engineer/resumes/${resumeId}`);
+  return response.data;
+};
+
+export const getResumeAnalysisApi = async (resumeId) => {
+  const response = await client.get(`/api/engineer/resumes/${resumeId}/analysis`);
+  return response.data;
+};
+
+export const downloadResumeApi = async (resumeId, fileName = 'resume.pdf') => {
+  const response = await client.get(`/api/engineer/resumes/${resumeId}/download`, {
+    responseType: 'blob'
+  });
+
+  const blob = new Blob([response.data], { type: response.headers['content-type'] });
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.setAttribute('download', fileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(downloadUrl);
+};
+
 export default {
   createCandidateApi,
   getCandidatesApi,
@@ -86,5 +139,11 @@ export default {
   verifyCandidateApi,
   rejectCandidateApi,
   getCandidateAuditApi,
-  getEngineerDashboardStatsApi
+  getEngineerDashboardStatsApi,
+  uploadCandidateResumeApi,
+  getCandidateResumesApi,
+  getCurrentCandidateResumeApi,
+  getResumeByIdApi,
+  getResumeAnalysisApi,
+  downloadResumeApi
 };

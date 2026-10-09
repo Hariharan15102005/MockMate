@@ -5,11 +5,14 @@
 
 # Java / Maven (Backend)
 backend/target/
+backend/storage/
+storage/
 *.class
 *.jar
 *.war
 *.ear
 .mvn/wrapper/maven-wrapper.jar
+
 
 # Node / Vite (Frontend)
 frontend/node_modules/

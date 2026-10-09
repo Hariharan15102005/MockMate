@@ -112,6 +112,62 @@ agenthire/
 - `/health-test` -> Full Service Connectivity & Health Diagnostic Monitor
 - `/login`, `/register` -> Authentication
 - `/admin/*` -> Admin Dashboard & User Management (Role: `ADMIN`)
-- `/engineer/*` -> Candidate Intake, Verification, Assignment & Report Delivery (Role: `INTERVIEW_ENGINEER`)
+- `/engineer/*` -> Candidate Intake, Verification, Resume Upload/Analysis & Report Delivery (Role: `INTERVIEW_ENGINEER`)
 - `/instructor/*` -> Candidate Review, Interview Builder, Evaluation & Final Decision (Role: `INSTRUCTOR`)
 - `/candidate/*` -> Device Check, Live Interview Room, Assessment View (Role: `CANDIDATE`)
+
+## 6. Resume Management & AI Analysis Architecture (Phase 7)
+
+```
+[Interview Engineer]
+        │
+        │ POST /api/engineer/candidates/{id}/resume (multipart/form-data)
+        ▼
+[Spring Boot REST API]
+        │
+        ├── 1. Authorize: INTERVIEW_ENGINEER only
+        ├── 2. Validate Candidate status == VERIFIED (409 Conflict if not)
+        ├── 3. Validate File format (PDF/DOCX) & size (<= 10MB)
+        ├── 4. Secure File Storage: LocalResumeStorageService (UUID storage key, anti-traversal)
+        ├── 5. Resume Entity Versioning: v1, v2, v3... (previous marked isCurrent=false)
+        ├── 6. Server-side Text Extraction: Apache PDFBox & Apache POI (30k character safe limit)
+        │
+        │ POST /api/ai/resume/analyze
+        ▼
+[FastAPI AI Service (:8000)]
+        │
+        ▼
+[LangGraph Resume Agent StateGraph]
+   START
+     │
+     ▼
+   [validate_input] ────────────► Neutralize prompt injections & clean candidate text
+     │
+     ▼
+   [extract_structured_info] ───► Extract summary, skills, education, experience, projects, certs
+     │
+     ▼
+   [skill_normalization] ───────► Canonical taxonomy mapping & tech stack categorisation
+     │
+     ▼
+   [role_relevance_analysis] ───► Calculate match score (0-100) & evaluation rationale
+     │
+     ▼
+   [gap_analysis] ──────────────► Identify technical discovery areas & evaluation gaps
+     │
+     ▼
+   [final_structured_output] ───► Pydantic structured output validation
+     │
+     ▼
+    END
+        │
+        │ HTTP 200 (Structured JSON)
+        ▼
+[Spring Boot]
+        │
+        ├── Validate AI JSON Response
+        ├── Persist ResumeAnalysis entity & Update Resume status = ANALYZED
+        ├── AuditLog: RESUME_UPLOADED, RESUME_ANALYSIS_STARTED, RESUME_ANALYSIS_COMPLETED
+        └── Error Fallback: On AI timeout/failure -> Resume status = ANALYSIS_FAILED, Candidate preserved
+```
+

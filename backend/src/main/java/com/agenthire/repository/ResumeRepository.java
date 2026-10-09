@@ -11,5 +11,7 @@ import java.util.UUID;
 @Repository
 public interface ResumeRepository extends JpaRepository<Resume, UUID> {
     List<Resume> findByCandidateId(UUID candidateId);
+    List<Resume> findByCandidateIdOrderByVersionDesc(UUID candidateId);
     Optional<Resume> findByCandidateIdAndIsCurrentTrue(UUID candidateId);
+    Optional<Resume> findTopByCandidateIdOrderByVersionDesc(UUID candidateId);
 }

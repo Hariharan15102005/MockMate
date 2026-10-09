@@ -19,10 +19,15 @@ import lombok.ToString;
 
 import java.time.Instant;
 
+import com.agenthire.entity.enums.ResumeStatus;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+
 @Entity
 @Table(name = "resumes", indexes = {
         @Index(name = "idx_resume_candidate", columnList = "candidate_id"),
-        @Index(name = "idx_resume_is_current", columnList = "is_current")
+        @Index(name = "idx_resume_is_current", columnList = "is_current"),
+        @Index(name = "idx_resume_status", columnList = "status")
 })
 @Getter
 @Setter
@@ -47,8 +52,8 @@ public class Resume extends BaseEntity {
     @Column(name = "file_path", nullable = false, length = 500)
     private String filePath;
 
-    @Size(max = 50)
-    @Column(name = "file_type", length = 50)
+    @Size(max = 100)
+    @Column(name = "file_type", length = 100)
     @Builder.Default
     private String fileType = "application/pdf";
 
@@ -69,4 +74,13 @@ public class Resume extends BaseEntity {
     @Builder.Default
     @Column(name = "is_current", nullable = false)
     private Boolean isCurrent = true;
+
+    @NotNull(message = "Status is required")
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 40)
+    @Builder.Default
+    private ResumeStatus status = ResumeStatus.UPLOADED;
+
+    @Column(name = "extracted_text", columnDefinition = "LONGTEXT")
+    private String extractedText;
 }

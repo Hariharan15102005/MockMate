@@ -73,6 +73,18 @@ public class ResumeAnalysis extends BaseEntity {
     @Column(name = "question_areas_json", columnDefinition = "TEXT")
     private String questionAreasJson;
 
+    @Column(name = "potential_gaps_json", columnDefinition = "TEXT")
+    private String potentialGapsJson;
+
+    @Column(name = "role_relevance_score")
+    private Double roleRelevanceScore;
+
+    @Column(name = "role_relevance_reason", columnDefinition = "TEXT")
+    private String roleRelevanceReason;
+
+    @Column(name = "raw_analysis_json", columnDefinition = "LONGTEXT")
+    private String rawAnalysisJson;
+
     @Column(name = "analyzed_at")
     private Instant analyzedAt;
 
