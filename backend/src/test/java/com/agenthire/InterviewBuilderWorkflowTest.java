@@ -124,9 +124,18 @@ public class InterviewBuilderWorkflowTest {
     private String engineerToken;
     private String candidateToken;
     private String adminToken;
+    @Autowired
+    private com.agenthire.repository.InterviewSessionRepository interviewSessionRepository;
+
+    @Autowired
+    private com.agenthire.repository.InterviewAssignmentRepository interviewAssignmentRepository;
 
     @BeforeEach
     void setUp() {
+        try {
+            interviewSessionRepository.deleteAll();
+            interviewAssignmentRepository.deleteAll();
+        } catch (Exception ignored) {}
         questionRepository.deleteAll();
         roundRepository.deleteAll();
         scoringConfigRepository.deleteAll();

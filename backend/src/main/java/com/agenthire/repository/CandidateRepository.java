@@ -13,6 +13,7 @@ import java.util.UUID;
 @Repository
 public interface CandidateRepository extends JpaRepository<Candidate, UUID>, JpaSpecificationExecutor<Candidate> {
     Optional<Candidate> findByEmail(String email);
+    Optional<Candidate> findByUserId(UUID userId);
     Optional<Candidate> findByApplicationId(String applicationId);
     boolean existsByApplicationId(String applicationId);
     List<Candidate> findByStatus(CandidateStatus status);

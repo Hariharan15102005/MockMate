@@ -27,6 +27,10 @@ ai-service/*/*/__pycache__/
 ai-service/venv/
 ai-service/.venv/
 ai-service/.pytest_cache/
+ai-service/chroma_db/
+ai-service/test_chroma/
+chroma_db/
+test_chroma/
 *.py[cod]
 *$py.class
 *.so

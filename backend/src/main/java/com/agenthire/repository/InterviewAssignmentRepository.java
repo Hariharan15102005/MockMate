@@ -14,4 +14,5 @@ public interface InterviewAssignmentRepository extends JpaRepository<InterviewAs
     List<InterviewAssignment> findByInterviewId(UUID interviewId);
     List<InterviewAssignment> findByAssignedById(UUID instructorId);
     List<InterviewAssignment> findByCandidateIdAndStatus(UUID candidateId, AssignmentStatus status);
+    java.util.Optional<InterviewAssignment> findByCandidateIdAndInterviewId(UUID candidateId, UUID interviewId);
 }

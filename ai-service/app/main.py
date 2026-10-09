@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.schemas.health import HealthResponse
-from app.api import resume
+from app.api import resume, interview
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -28,6 +28,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(resume.router)
+app.include_router(interview.router)
 
 @app.get(
     "/ai/health",

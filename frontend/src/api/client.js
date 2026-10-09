@@ -20,12 +20,20 @@ export const aiApi = axios.create({
   },
 });
 
-// Request Interceptor: Attach JWT Bearer Token
+// Request Interceptor: Attach JWT Bearer Token and Normalize API Paths
 backendApi.interceptors.request.use((config) => {
   const token = authStorage.getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Prevent duplicate /api/api prefixes if caller passes /api/...
+  if (config.url) {
+    if (API_BASE_URL.endsWith('/api') && config.url.startsWith('/api/')) {
+      config.url = config.url.substring(4); // Remove leading /api
+    }
+  }
+
   return config;
 }, (error) => {
   return Promise.reject(error);

@@ -12,4 +12,5 @@ import java.util.UUID;
 public interface CandidateAnswerRepository extends JpaRepository<CandidateAnswer, UUID> {
     List<CandidateAnswer> findBySessionIdOrderBySequenceNumberAsc(UUID sessionId);
     Optional<CandidateAnswer> findBySessionIdAndQuestionId(UUID sessionId, UUID questionId);
+    List<CandidateAnswer> findBySessionCandidateId(UUID candidateId);
 }

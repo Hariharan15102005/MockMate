@@ -375,4 +375,17 @@ def run_resume_analysis(request: ResumeAnalysisRequest) -> ResumeAnalysisRespons
     if not final_dict:
         raise ValueError("Failed to construct final structured resume analysis.")
 
+    # Automatically chunk and index into ChromaDB with candidate isolation
+    try:
+        from app.services.chroma_service import chunk_and_index_resume
+        chunk_and_index_resume(
+            candidate_id=request.candidate_id,
+            resume_id=request.resume_id,
+            resume_data=final_dict
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Non-fatal Chroma indexing note: {e}")
+
     return ResumeAnalysisResponse(**final_dict)
+

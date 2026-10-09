@@ -15,4 +15,6 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
     List<InterviewSession> findByCandidateId(UUID candidateId);
     List<InterviewSession> findByInterviewId(UUID interviewId);
     List<InterviewSession> findByStatus(SessionStatus status);
+    Optional<InterviewSession> findFirstByCandidateIdAndInterviewIdOrderByCreatedAtDesc(UUID candidateId, UUID interviewId);
+    Optional<InterviewSession> findFirstByCandidateIdAndInterviewIdAndStatus(UUID candidateId, UUID interviewId, SessionStatus status);
 }

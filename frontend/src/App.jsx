@@ -62,9 +62,13 @@ import InstructorProfile from './pages/instructor/Profile';
 // Candidate Pages
 import CandidateDashboard from './pages/candidate/Dashboard';
 import CandidateInterviews from './pages/candidate/Interviews';
+import InterviewPreCheck from './pages/candidate/InterviewPreCheck';
+import InterviewRoom from './pages/candidate/InterviewRoom';
+import InterviewResult from './pages/candidate/InterviewResult';
 import CandidateUpcoming from './pages/candidate/UpcomingInterviews';
 import CandidateCompleted from './pages/candidate/CompletedInterviews';
 import CandidateProfile from './pages/candidate/Profile';
+import InterviewReportView from './pages/instructor/InterviewReportView';
 
 export const App = () => {
   return (
@@ -202,6 +206,8 @@ export const App = () => {
                       <Route path="interviews/scheduled" element={<InstructorScheduled />} />
                       <Route path="interviews/in-progress" element={<InstructorInProgress />} />
                       <Route path="interviews/completed" element={<InstructorCompleted />} />
+                      <Route path="interviews/sessions/:sessionId/report" element={<InterviewReportView />} />
+                      <Route path="reports/:sessionId" element={<InterviewReportView />} />
                       <Route path="reports" element={<InstructorReports />} />
                       <Route path="analytics" element={<InstructorAnalytics />} />
                       <Route path="notifications" element={<InstructorNotifications />} />
@@ -215,7 +221,81 @@ export const App = () => {
           />
 
           {/* ==========================================================
-              CANDIDATE PROTECTED ROUTES
+              CANDIDATE LIVE INTERVIEW ROOM (FULLSCREEN / FOCUS)
+             ========================================================== */}
+          <Route
+            path="/candidate/interviews/self-service/room/:sessionId"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/candidate/interviews/self-service/room"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/candidate/interviews/self-service/session"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/candidate/interviews/:id/session"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/candidate/interviews/:id/room"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/candidate/interviews/sessions/:sessionId"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/candidate/interviews/room/:sessionId"
+            element={
+              <ProtectedRoute>
+                <RoleRoute allowedRoles={['CANDIDATE']}>
+                  <InterviewRoom />
+                </RoleRoute>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ==========================================================
+              CANDIDATE PROTECTED ROUTES (STANDARD LAYOUT)
              ========================================================== */}
           <Route
             path="/candidate/*"
@@ -226,6 +306,15 @@ export const App = () => {
                     <Routes>
                       <Route path="dashboard" element={<CandidateDashboard />} />
                       <Route path="interviews" element={<CandidateInterviews />} />
+                      <Route path="interviews/self-service/precheck" element={<InterviewPreCheck />} />
+                      <Route path="interviews/self-service/room/:sessionId" element={<InterviewRoom />} />
+                      <Route path="interviews/self-service/room" element={<InterviewRoom />} />
+                      <Route path="interviews/:id/precheck" element={<InterviewPreCheck />} />
+                      <Route path="interviews/:id/session" element={<InterviewRoom />} />
+                      <Route path="interviews/:id/room" element={<InterviewRoom />} />
+                      <Route path="interviews/:id" element={<InterviewPreCheck />} />
+                      <Route path="interviews/:sessionId/result" element={<InterviewResult />} />
+                      <Route path="interviews/results/:sessionId" element={<InterviewResult />} />
                       <Route path="interviews/upcoming" element={<CandidateUpcoming />} />
                       <Route path="interviews/completed" element={<CandidateCompleted />} />
                       <Route path="profile" element={<CandidateProfile />} />
