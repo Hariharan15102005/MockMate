@@ -17,9 +17,11 @@ class GenerateQuestionRequest(BaseModel):
     historical_questions: Optional[List[str]] = []
     claims: Optional[List[str]] = []
     remaining_seconds: Optional[int] = 2700
+    perspective: Optional[str] = None
+    previous_perspectives: Optional[List[str]] = []
 
 class GenerateQuestionResponse(BaseModel):
-    action: str = "ASK_QUESTION" # ASK_QUESTION, FOLLOW_UP, CLARIFY, REPEAT, TRANSITION, END_INTERVIEW
+    action: str = "ASK_QUESTION" # ASK_QUESTION, FOLLOW_UP, CLARIFY, REPEAT, TRANSITION, END_INTERVIEW, GO_DEEPER, CHALLENGE, SWITCH_TOPIC
     acknowledgement: Optional[str] = ""
     question_text: str
     full_speech_text: str
@@ -37,6 +39,8 @@ class GenerateQuestionResponse(BaseModel):
     project: Optional[str] = None
     angle: Optional[str] = None
     question_type: Optional[str] = None
+    perspective: Optional[str] = None
+    perspective_goal: Optional[str] = None
 
 class EvaluateAnswerRequest(BaseModel):
     session_id: str

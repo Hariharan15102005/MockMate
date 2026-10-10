@@ -407,6 +407,21 @@ public class CandidateInterviewService {
 
             List<String> historicalQuestions = new ArrayList<>(historicalQuestionsSet);
 
+            // Fetch previous perspectives across all sessions for this candidate
+            List<InterviewSession> allCandidateSessions = interviewSessionRepository.findByCandidateId(candidate.getId());
+            List<String> previousPerspectives = allCandidateSessions.stream()
+                    .filter(s -> !s.getId().equals(session.getId()))
+                    .map(InterviewSession::getSessionTokenHash)
+                    .filter(hash -> hash != null && hash.startsWith("PERSPECTIVE:"))
+                    .map(hash -> hash.substring("PERSPECTIVE:".length()))
+                    .distinct()
+                    .collect(Collectors.toList());
+
+            String currentPerspective = null;
+            if (session.getSessionTokenHash() != null && session.getSessionTokenHash().startsWith("PERSPECTIVE:")) {
+                currentPerspective = session.getSessionTokenHash().substring("PERSPECTIVE:".length());
+            }
+
             AiQuestionRequest aiReq = AiQuestionRequest.builder()
                     .sessionId(session.getId().toString())
                     .candidateId(candidate.getId().toString())
@@ -420,9 +435,16 @@ public class CandidateInterviewService {
                     .conversationHistory(prevInteractions)
                     .historicalQuestions(historicalQuestions)
                     .lastCandidateAnswer(lastAnswer)
+                    .perspective(currentPerspective)
+                    .previousPerspectives(previousPerspectives)
+                    .remainingSeconds(session.getRemainingSeconds() != null ? session.getRemainingSeconds() : 2700)
                     .build();
 
             AiQuestionResponse aiRes = aiServiceClient.generateQuestion(aiReq);
+            if (aiRes.getPerspective() != null && !aiRes.getPerspective().isBlank()) {
+                session.setSessionTokenHash("PERSPECTIVE:" + aiRes.getPerspective());
+                interviewSessionRepository.save(session);
+            }
             questionText = aiRes.getQuestionText();
             fullSpeechText = aiRes.getFullSpeechText() != null ? aiRes.getFullSpeechText() : questionText;
             topic = aiRes.getTopic() != null ? aiRes.getTopic() : (aiRes.getQuestionCategory() != null ? aiRes.getQuestionCategory() : roundTypeStr);

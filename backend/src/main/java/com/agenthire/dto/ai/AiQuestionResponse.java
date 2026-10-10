@@ -58,4 +58,13 @@ public class AiQuestionResponse {
 
     @JsonProperty("question_type")
     private String questionType;
+
+    @JsonProperty("action")
+    private String action;
+
+    @JsonProperty("perspective")
+    private String perspective;
+
+    @JsonProperty("perspective_goal")
+    private String perspectiveGoal;
 }

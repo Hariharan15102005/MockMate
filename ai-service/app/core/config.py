@@ -25,3 +25,4 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "gemini-1.5-pro"
 
 settings = Settings()
+

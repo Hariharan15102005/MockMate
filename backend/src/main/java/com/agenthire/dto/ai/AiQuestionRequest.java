@@ -50,4 +50,13 @@ public class AiQuestionRequest {
 
     @JsonProperty("last_candidate_answer")
     private String lastCandidateAnswer;
+
+    @JsonProperty("perspective")
+    private String perspective;
+
+    @JsonProperty("previous_perspectives")
+    private List<String> previousPerspectives;
+
+    @JsonProperty("remaining_seconds")
+    private Integer remainingSeconds;
 }
