@@ -8,9 +8,12 @@ import {
   submitAnswerApi,
   recordQuestionTimeoutApi,
   recordMediaEventApi,
-  completeInterviewApi
+  completeInterviewApi,
+  submitVisualAnalysisSummaryApi
 } from '../../api/candidateInterview';
 import HumanInterviewer from '../../components/interview/HumanInterviewer';
+import RealTimeVisualPanel from '../../components/interview/RealTimeVisualPanel';
+import useVisualAnalysis from '../../hooks/useVisualAnalysis';
 import useInterviewSpeech from '../../hooks/useInterviewSpeech';
 import useSpeechRecognition from '../../hooks/useSpeechRecognition';
 import Button from '../../components/common/Button';
@@ -100,6 +103,13 @@ export const InterviewRoom = () => {
   const [micMuted, setMicMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const videoRef = useRef(null);
+
+  // Genuine On-Device Visual Analysis Hook (low-frequency non-blocking MediaPipe pipeline)
+  const { currentObservation, getFinalSummary, resetAnalysis } = useVisualAnalysis({
+    videoRef,
+    isActive: cameraActive && !isPaused && interviewerState !== 'ENDING',
+    sessionId: session?.sessionId || sessionId
+  });
 
   // Modals
   const [showHints, setShowHints] = useState(false);
@@ -235,7 +245,10 @@ export const InterviewRoom = () => {
   const cleanupInterviewResources = useCallback(() => {
     clearAllTimers();
     stopAllMedia();
-  }, [clearAllTimers, stopAllMedia]);
+    if (resetAnalysis) {
+      resetAnalysis();
+    }
+  }, [clearAllTimers, stopAllMedia, resetAnalysis]);
 
   // Initialize Session & Candidate Camera
   useEffect(() => {
@@ -668,11 +681,20 @@ export const InterviewRoom = () => {
   const handleFinishInterview = async () => {
     try {
       setInterviewerState('ENDING');
-      cleanupInterviewResources();
       const targetSessionId = session?.sessionId || sessionId;
       if (targetSessionId) {
+        // Submit aggregated client-side visual analysis summary before cleanup
+        try {
+          const visualSummary = getFinalSummary ? getFinalSummary() : null;
+          if (visualSummary && visualSummary.totalSamplesAnalyzed > 0) {
+            await submitVisualAnalysisSummaryApi(targetSessionId, visualSummary);
+          }
+        } catch (visErr) {
+          console.warn('Notice: Visual analysis summary submission deferred/handled:', visErr);
+        }
         await completeInterviewApi(targetSessionId);
       }
+      cleanupInterviewResources();
       navigate(`/candidate/interviews/${targetSessionId}/result`);
     } catch (err) {
       console.error('Complete interview error:', err);
@@ -1395,53 +1417,19 @@ export const InterviewRoom = () => {
               </div>
             )}
 
-            {/* Proctoring Badges */}
+            {/* Live Computer-Vision Visual Analysis Panel */}
             <div
               style={{
                 position: 'absolute',
                 top: '0.75rem',
                 left: '0.75rem',
-                padding: '0.3rem 0.75rem',
-                borderRadius: '9999px',
-                background: 'rgba(15, 23, 42, 0.85)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#34d399',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem'
+                zIndex: 10
               }}
             >
-              <span
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: '#34d399',
-                  animation: 'pulse 1.5s infinite'
-                }}
+              <RealTimeVisualPanel
+                observation={currentObservation}
+                cameraActive={cameraActive}
               />
-              Face Present • Live Proctoring Active
-            </div>
-
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '0.75rem',
-                right: '0.75rem',
-                padding: '0.3rem 0.75rem',
-                borderRadius: '9999px',
-                background: 'rgba(15, 23, 42, 0.85)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#cbd5e1',
-                fontSize: '0.75rem',
-                fontFamily: 'monospace'
-              }}
-            >
-              Integrity: Optimal
             </div>
           </div>
 

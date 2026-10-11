@@ -1,6 +1,7 @@
 package com.agenthire.service;
 
 import com.agenthire.dto.ai.AiAnswerEvalResponse;
+import com.agenthire.dto.ai.AiQuestionRequest;
 import com.agenthire.dto.ai.AiQuestionResponse;
 import com.agenthire.dto.candidate.*;
 import com.agenthire.entity.*;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -293,5 +295,180 @@ class CandidateInterviewServiceTest {
         assertEquals(100.0, result.getIntegrityScore()); // 0 media anomalies
         assertEquals(SessionStatus.COMPLETED, session.getStatus());
         verify(interviewReportRepository, times(1)).save(any(InterviewReport.class));
+    }
+
+    @Test
+    @DisplayName("Candidate prior weaknesses are retrieved and passed to AI service question generation")
+    void testHistoricalWeaknessesPassedToAiService() {
+        // Create an earlier completed session for this candidate
+        InterviewSession priorSession = InterviewSession.builder()
+                .candidate(candidate)
+                .interview(interview)
+                .status(SessionStatus.COMPLETED)
+                .startedAt(Instant.now().minusSeconds(7200))
+                .endedAt(Instant.now().minusSeconds(3600))
+                .build();
+        priorSession.setId(UUID.randomUUID());
+
+        InterviewReport priorReport = InterviewReport.builder()
+                .session(priorSession)
+                .overallScore(68.0)
+                .technicalScore(65.0)
+                .communicationScore(75.0)
+                .comprehensiveAnalysisJson("{\"weak_topics_for_practice\": [\"Kafka\", \"Redis\"], \"weaknesses\": [{\"topic\": \"Kafka\", \"gap_type\": \"CONCEPTUAL\"}]}")
+                .build();
+
+        when(candidateRepository.findByUserId(candidateUser.getId())).thenReturn(Optional.of(candidate));
+        when(interviewSessionRepository.findById(session.getId())).thenReturn(Optional.of(session));
+        when(interviewRoundRepository.findByInterviewIdOrderBySequenceNumberAsc(interview.getId())).thenReturn(List.of(round1));
+        when(candidateAnswerRepository.findBySessionIdOrderBySequenceNumberAsc(session.getId())).thenReturn(Collections.emptyList());
+        when(candidateAnswerRepository.findBySessionCandidateId(candidate.getId())).thenReturn(Collections.emptyList());
+        when(interviewQuestionHistoryRepository.findByCandidateId(candidate.getId())).thenReturn(Collections.emptyList());
+        when(interviewSessionRepository.findByCandidateId(candidate.getId())).thenReturn(List.of(priorSession, session));
+        when(interviewReportRepository.findBySessionId(priorSession.getId())).thenReturn(Optional.of(priorReport));
+
+        AiQuestionResponse fakeResponse = AiQuestionResponse.builder()
+                .questionText("How do consumer groups handle rebalancing in Apache Kafka?")
+                .questionCategory("TECHNICAL")
+                .topic("Kafka")
+                .build();
+        when(aiServiceClient.generateQuestion(any(AiQuestionRequest.class))).thenReturn(fakeResponse);
+
+        Question fakeQ = Question.builder().interview(interview).round(round1).questionText(fakeResponse.getQuestionText()).build();
+        fakeQ.setId(UUID.randomUUID());
+        when(questionRepository.save(any(Question.class))).thenReturn(fakeQ);
+
+        CandidateQuestionDto qDto = candidateInterviewService.getCurrentQuestion(session.getId(), candidateUser.getId());
+
+        assertNotNull(qDto);
+        ArgumentCaptor<AiQuestionRequest> captor = ArgumentCaptor.forClass(AiQuestionRequest.class);
+        verify(aiServiceClient).generateQuestion(captor.capture());
+        AiQuestionRequest sentReq = captor.getValue();
+
+        assertNotNull(sentReq.getPriorityTopics());
+        assertTrue(sentReq.getPriorityTopics().contains("Kafka"));
+        assertTrue(sentReq.getPriorityTopics().contains("Redis"));
+        assertNotNull(sentReq.getHistoricalWeaknesses());
+        assertEquals(1, sentReq.getHistoricalWeaknesses().size());
+        assertEquals("Kafka", sentReq.getHistoricalWeaknesses().get(0).get("topic"));
+    }
+
+    @Test
+    @DisplayName("Candidate result includes cross-interview comparison when prior completed session exists")
+    void testHistoricalComparisonInCandidateResult() {
+        InterviewSession priorSession = InterviewSession.builder()
+                .candidate(candidate)
+                .interview(interview)
+                .status(SessionStatus.COMPLETED)
+                .startedAt(Instant.now().minusSeconds(7200))
+                .endedAt(Instant.now().minusSeconds(3600))
+                .build();
+        priorSession.setId(UUID.randomUUID());
+
+        InterviewReport priorReport = InterviewReport.builder()
+                .session(priorSession)
+                .overallScore(72.0)
+                .technicalScore(70.0)
+                .communicationScore(75.0)
+                .problemSolvingScore(70.0)
+                .comprehensiveAnalysisJson("{\"weak_topics_for_practice\": [\"Spring Security\"]}")
+                .build();
+
+        InterviewReport currentReport = InterviewReport.builder()
+                .session(session)
+                .overallScore(84.0)
+                .technicalScore(85.0)
+                .communicationScore(82.0)
+                .problemSolvingScore(80.0)
+                .build();
+
+        when(candidateRepository.findByUserId(candidateUser.getId())).thenReturn(Optional.of(candidate));
+        when(interviewSessionRepository.findById(session.getId())).thenReturn(Optional.of(session));
+        when(interviewReportRepository.findBySessionId(session.getId())).thenReturn(Optional.of(currentReport));
+        when(candidateAnswerRepository.findBySessionIdOrderBySequenceNumberAsc(session.getId())).thenReturn(Collections.emptyList());
+        when(interviewSessionRepository.findByCandidateId(candidate.getId())).thenReturn(List.of(priorSession, session));
+        when(interviewReportRepository.findBySessionId(priorSession.getId())).thenReturn(Optional.of(priorReport));
+
+        CandidateInterviewResultDto result = candidateInterviewService.getCandidateResult(session.getId(), candidateUser.getId());
+
+        assertNotNull(result);
+        assertNotNull(result.getHistoricalComparison());
+        Map<String, Object> comp = result.getHistoricalComparison();
+        assertEquals(true, comp.get("hasHistoricalData"));
+        assertEquals(72.0, comp.get("previousOverallScore"));
+        assertEquals(84.0, comp.get("currentOverallScore"));
+        assertEquals(12.0, comp.get("overallScoreDelta"));
+    }
+
+    @Test
+    @DisplayName("saveVisualSummary persists media event and links with report")
+    void testSaveVisualSummary_Success() {
+        when(candidateRepository.findByUserId(candidateUser.getId())).thenReturn(Optional.of(candidate));
+        when(interviewSessionRepository.findById(session.getId())).thenReturn(Optional.of(session));
+
+        SaveVisualSummaryRequest request = SaveVisualSummaryRequest.builder()
+                .hasVisualData(true)
+                .analysisStatus("COMPLETED")
+                .totalSamplesAnalyzed(120)
+                .faceVisibilityPercent(95.5)
+                .upperBodyVisibilityPercent(88.0)
+                .framingSuitablePercent(92.0)
+                .lightingAdequacyPercent(87.5)
+                .sustainedAbsenceIntervals(0)
+                .multipleFaceDetections(0)
+                .summaryFeedback(List.of("Face detected in 96% of samples"))
+                .build();
+
+        InterviewReport existingReport = InterviewReport.builder()
+                .session(session)
+                .candidate(candidate)
+                .overallScore(85.0)
+                .build();
+        when(interviewReportRepository.findBySessionId(session.getId())).thenReturn(Optional.of(existingReport));
+
+        candidateInterviewService.saveVisualSummary(session.getId(), request, candidateUser.getId());
+
+        ArgumentCaptor<MediaEvent> eventCaptor = ArgumentCaptor.forClass(MediaEvent.class);
+        verify(mediaEventRepository, times(1)).save(eventCaptor.capture());
+
+        MediaEvent savedEvent = eventCaptor.getValue();
+        assertEquals(MediaEventType.VISUAL_ANALYSIS_SUMMARY, savedEvent.getEventType());
+        assertEquals(session, savedEvent.getSession());
+        assertNotNull(savedEvent.getMetadataJson());
+        assertTrue(savedEvent.getMetadataJson().contains("95.5"));
+
+        verify(interviewReportRepository, times(1)).save(existingReport);
+        assertNotNull(existingReport.getVisualAnalysisJson());
+    }
+
+    @Test
+    @DisplayName("saveVisualSummary rejects unauthorized candidate session access")
+    void testSaveVisualSummary_Unauthorized() {
+        User otherUser = User.builder().email("other@mockmate.ai").role(UserRole.CANDIDATE).build();
+        otherUser.setId(UUID.randomUUID());
+        Candidate otherCandidate = Candidate.builder()
+                .user(otherUser)
+                .build();
+        otherCandidate.setId(UUID.randomUUID());
+
+        InterviewSession otherSession = InterviewSession.builder()
+                .candidate(otherCandidate)
+                .interview(interview)
+                .build();
+        otherSession.setId(UUID.randomUUID());
+
+        when(candidateRepository.findByUserId(candidateUser.getId())).thenReturn(Optional.of(candidate));
+        when(interviewSessionRepository.findById(otherSession.getId())).thenReturn(Optional.of(otherSession));
+
+        SaveVisualSummaryRequest request = SaveVisualSummaryRequest.builder()
+                .hasVisualData(true)
+                .totalSamplesAnalyzed(10)
+                .build();
+
+        assertThrows(AccessDeniedException.class, () ->
+                candidateInterviewService.saveVisualSummary(otherSession.getId(), request, candidateUser.getId())
+        );
+
+        verify(mediaEventRepository, never()).save(any());
     }
 }

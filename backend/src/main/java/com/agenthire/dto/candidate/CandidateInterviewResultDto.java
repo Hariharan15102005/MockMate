@@ -34,5 +34,7 @@ public class CandidateInterviewResultDto {
     private List<String> improvementAreas;
     private List<Map<String, Object>> questionEvaluations;
     private Map<String, Object> comprehensiveAnalysis;
+    private Map<String, Object> historicalComparison;
+    private Map<String, Object> visualAnalysis;
     private Instant completedAt;
 }

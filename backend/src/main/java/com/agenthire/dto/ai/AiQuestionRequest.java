@@ -59,4 +59,10 @@ public class AiQuestionRequest {
 
     @JsonProperty("remaining_seconds")
     private Integer remainingSeconds;
+
+    @JsonProperty("priority_topics")
+    private List<String> priorityTopics;
+
+    @JsonProperty("historical_weaknesses")
+    private List<Map<String, Object>> historicalWeaknesses;
 }

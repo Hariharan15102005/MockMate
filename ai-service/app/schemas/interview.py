@@ -20,6 +20,7 @@ class GenerateQuestionRequest(BaseModel):
     perspective: Optional[str] = None
     previous_perspectives: Optional[List[str]] = []
     priority_topics: Optional[List[str]] = []
+    historical_weaknesses: Optional[List[Dict[str, Any]]] = []
 
 class GenerateQuestionResponse(BaseModel):
     action: str = "ASK_QUESTION" # ASK_QUESTION, FOLLOW_UP, CLARIFY, REPEAT, TRANSITION, END_INTERVIEW, GO_DEEPER, CHALLENGE, SWITCH_TOPIC

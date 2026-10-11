@@ -14,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -136,6 +137,18 @@ public class CandidateInterviewController {
         return ResponseEntity.ok(candidateInterviewService.completeInterview(sessionId, principal.getId()));
     }
 
+    @PostMapping("/api/candidate/interviews/sessions/{sessionId}/visual-summary")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Submit aggregated on-device visual presentation summary")
+    public ResponseEntity<Map<String, Object>> saveVisualSummary(
+            @PathVariable("sessionId") UUID sessionId,
+            @RequestBody SaveVisualSummaryRequest request,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        candidateInterviewService.saveVisualSummary(sessionId, request, principal.getId());
+        return ResponseEntity.ok(Map.of("status", "SUCCESS", "message", "Visual summary recorded successfully"));
+    }
+
     @GetMapping("/api/candidate/interviews/sessions/{sessionId}/result")
     @PreAuthorize("hasRole('CANDIDATE')")
     @Operation(summary = "Get student interview result")
@@ -146,9 +159,10 @@ public class CandidateInterviewController {
         return ResponseEntity.ok(candidateInterviewService.getCandidateResult(sessionId, principal.getId()));
     }
 
+    @Deprecated
     @PostMapping("/api/candidate/interviews/sessions/{sessionId}/practice-weak-areas")
     @PreAuthorize("hasRole('CANDIDATE')")
-    @Operation(summary = "Start targeted practice interview session based on previous weak areas")
+    @Operation(summary = "Start targeted practice interview session (Deprecated: unified default adaptive interview now automatically factors in candidate's historical weaknesses)")
     public ResponseEntity<StartSessionResponseDto> practiceWeakAreas(
             @PathVariable("sessionId") UUID sessionId,
             @AuthenticationPrincipal UserPrincipal principal

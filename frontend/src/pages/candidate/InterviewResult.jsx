@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getCandidateResultApi, startPracticeWeakAreasApi } from '../../api/candidateInterview';
+import { getCandidateResultApi } from '../../api/candidateInterview';
 import Button from '../../components/common/Button';
 import {
   Award,
@@ -25,7 +25,10 @@ import {
   Square,
   BookOpen,
   Zap,
-  Code2
+  Code2,
+  Camera,
+  Eye,
+  Sun
 } from 'lucide-react';
 
 export const InterviewResult = () => {
@@ -35,7 +38,6 @@ export const InterviewResult = () => {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [startingPractice, setStartingPractice] = useState(false);
   const [expandedQuestion, setExpandedQuestion] = useState(null);
   const [expandedWeakness, setExpandedWeakness] = useState(null);
   const [completedTasks, setCompletedTasks] = useState({});
@@ -72,25 +74,6 @@ export const InterviewResult = () => {
     };
     setCompletedTasks(updated);
     localStorage.setItem(`roadmap_tasks_${sessionId}`, JSON.stringify(updated));
-  };
-
-  const handleStartPracticeMode = async () => {
-    try {
-      setStartingPractice(true);
-      const res = await startPracticeWeakAreasApi(sessionId);
-      const newSessionId = res.sessionId || res.data?.sessionId;
-      if (newSessionId) {
-        navigate(`/candidate/interviews/${newSessionId}`);
-      } else {
-        navigate('/candidate/interviews');
-      }
-    } catch (err) {
-      console.error('Failed to start practice mode:', err);
-      alert('Unable to launch targeted practice session. Starting standard interview session instead.');
-      navigate('/candidate/interviews');
-    } finally {
-      setStartingPractice(false);
-    }
   };
 
   const handlePrint = () => {
@@ -241,8 +224,7 @@ export const InterviewResult = () => {
           </button>
 
           <button
-            onClick={handleStartPracticeMode}
-            disabled={startingPractice}
+            onClick={() => navigate('/candidate/interviews')}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -254,13 +236,12 @@ export const InterviewResult = () => {
               border: 'none',
               fontSize: '0.875rem',
               fontWeight: 700,
-              cursor: startingPractice ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
               boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
               transition: 'all 0.2s ease'
             }}
           >
-            {startingPractice ? <RefreshCw size={15} className="spin" /> : <Target size={16} />}
-            {startingPractice ? 'Starting Session...' : 'Practise My Weak Areas'}
+            <ArrowRight size={16} /> My Interviews
           </button>
         </div>
       </div>
@@ -886,57 +867,237 @@ export const InterviewResult = () => {
         </div>
       </div>
 
-      {/* Section 9: Practice My Weak Areas Banner CTA */}
+      {/* Section 9: Cross-Interview Progress & Improvement Comparison (Available when reliable historical data exists) */}
+      {result?.historicalComparison?.hasHistoricalData && (
+        <div
+          style={{
+            padding: '2rem',
+            borderRadius: '1.25rem',
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid #334155', paddingBottom: '1rem' }}>
+            <div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#818cf8', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <TrendingUp size={15} /> Cross-Interview Performance Progress
+              </div>
+              <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f8fafc', margin: '0.25rem 0 0 0' }}>
+                Comparison with Previous Completed Interview
+              </h3>
+              <p style={{ fontSize: '0.825rem', color: '#94a3b8', margin: '0.25rem 0 0 0' }}>
+                Compared against session from {result.historicalComparison.previousCompletedAt ? new Date(result.historicalComparison.previousCompletedAt).toLocaleDateString() : 'earlier session'}: <em>{result.historicalComparison.previousInterviewTitle || 'Comprehensive Mock Interview'}</em>
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', background: '#1e1b4b', border: '1px solid #4338ca', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.7rem', color: '#a5b4fc', textTransform: 'uppercase', fontWeight: 700 }}>Previous Score</div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#e0e7ff' }}>{result.historicalComparison.previousOverallScore?.toFixed(1) || '0.0'}%</div>
+              </div>
+              <div style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', background: '#064e3b', border: '1px solid #059669', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.7rem', color: '#a7f3d0', textTransform: 'uppercase', fontWeight: 700 }}>Current Score</div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#ecfdf5' }}>{result.overallScore?.toFixed(1) || '0.0'}%</div>
+              </div>
+              <div style={{
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                background: (result.historicalComparison.overallScoreDelta || 0) >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                border: `1px solid ${(result.historicalComparison.overallScoreDelta || 0) >= 0 ? '#10b981' : '#ef4444'}`,
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '0.7rem', color: (result.historicalComparison.overallScoreDelta || 0) >= 0 ? '#34d399' : '#f87171', textTransform: 'uppercase', fontWeight: 700 }}>Net Change</div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: (result.historicalComparison.overallScoreDelta || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                  {(result.historicalComparison.overallScoreDelta || 0) >= 0 ? `+${result.historicalComparison.overallScoreDelta.toFixed(1)}%` : `${result.historicalComparison.overallScoreDelta.toFixed(1)}%`}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Metric Deltas Breakdown */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+            <div style={{ padding: '1rem', borderRadius: '0.75rem', background: '#1e293b', border: '1px solid #334155' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>Technical Knowledge</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.25rem' }}>
+                {result.technicalScore?.toFixed(1)}%
+                <span style={{ fontSize: '0.8rem', marginLeft: '0.5rem', color: (result.historicalComparison.technicalScoreDelta || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                  {(result.historicalComparison.technicalScoreDelta || 0) >= 0 ? `(+${result.historicalComparison.technicalScoreDelta?.toFixed(1)}%)` : `(${result.historicalComparison.technicalScoreDelta?.toFixed(1)}%)`}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem', borderRadius: '0.75rem', background: '#1e293b', border: '1px solid #334155' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>Communication & Articulation</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.25rem' }}>
+                {result.communicationScore?.toFixed(1)}%
+                <span style={{ fontSize: '0.8rem', marginLeft: '0.5rem', color: (result.historicalComparison.communicationScoreDelta || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                  {(result.historicalComparison.communicationScoreDelta || 0) >= 0 ? `(+${result.historicalComparison.communicationScoreDelta?.toFixed(1)}%)` : `(${result.historicalComparison.communicationScoreDelta?.toFixed(1)}%)`}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem', borderRadius: '0.75rem', background: '#1e293b', border: '1px solid #334155' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>Problem Solving & Architecture</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.25rem' }}>
+                {(result.systemDesignScore || result.technicalScore)?.toFixed(1)}%
+                <span style={{ fontSize: '0.8rem', marginLeft: '0.5rem', color: (result.historicalComparison.problemSolvingScoreDelta || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                  {(result.historicalComparison.problemSolvingScoreDelta || 0) >= 0 ? `(+${result.historicalComparison.problemSolvingScoreDelta?.toFixed(1)}%)` : `(${result.historicalComparison.problemSolvingScoreDelta?.toFixed(1)}%)`}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Demonstrated Growth vs Remaining Gaps */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.25rem' }}>
+            <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#34d399', fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                <CheckCircle2 size={16} /> Demonstrated Improvements This Interview
+              </div>
+              {result.historicalComparison.improvedTopics && result.historicalComparison.improvedTopics.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#cbd5e1', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                  {result.historicalComparison.improvedTopics.map((topic, i) => (
+                    <li key={i}>{topic}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.85rem' }}>
+                  Continued steady performance across core technical topics.
+                </p>
+              )}
+            </div>
+
+            <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171', fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                <AlertTriangle size={16} /> Persistent Focus Areas
+              </div>
+              {result.historicalComparison.persistentGaps && result.historicalComparison.persistentGaps.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#cbd5e1', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                  {result.historicalComparison.persistentGaps.map((gap, i) => (
+                    <li key={i}>{gap}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.85rem' }}>
+                  No recurrent critical knowledge gaps detected across sessions.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Section 10: Visual Presentation & Camera Feedback */}
       <div
         style={{
           padding: '2rem',
           borderRadius: '1.25rem',
-          background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
-          border: '1px solid rgba(129, 140, 248, 0.4)',
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)',
           display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1.5rem',
-          boxShadow: '0 10px 25px -5px rgba(49, 46, 129, 0.5)'
+          flexDirection: 'column',
+          gap: '1.5rem'
         }}
       >
-        <div style={{ flex: '1 1 450px' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#a5b4fc', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-            <Target size={14} /> Targeted Practice Mode
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid #334155', paddingBottom: '1rem' }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#818cf8', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <Camera size={15} /> Objective Vision Feedback
+            </div>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f8fafc', margin: '0.25rem 0 0 0' }}>
+              Visual Presentation & Camera Feedback
+            </h3>
+            <p style={{ fontSize: '0.825rem', color: '#94a3b8', margin: '0.25rem 0 0 0' }}>
+              On-device computer-vision observations measured during your interview session.
+            </p>
           </div>
-          <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f8fafc', margin: '0 0 0.5rem 0' }}>
-            Ready to drill your identified weak areas?
-          </h3>
-          <p style={{ fontSize: '0.85rem', color: '#c7d2fe', margin: 0, lineHeight: 1.5 }}>
-            Our interview engine will immediately start a targeted 20-minute mock session prioritizing{' '}
-            <strong>{weakTopics.slice(0, 2).join(' & ') || 'your growth areas'}</strong>, testing your improved articulation with adaptive follow-ups.
-          </p>
+
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.85rem', borderRadius: '9999px', background: 'rgba(52, 211, 153, 0.1)', border: '1px solid rgba(52, 211, 153, 0.3)', color: '#34d399', fontSize: '0.75rem', fontWeight: 700 }}>
+            <ShieldCheck size={14} /> Local Processing • Privacy Guaranteed
+          </div>
         </div>
 
-        <button
-          onClick={handleStartPracticeMode}
-          disabled={startingPractice}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.65rem',
-            padding: '0.85rem 1.75rem',
-            borderRadius: '0.75rem',
-            background: '#ffffff',
-            color: '#312e81',
-            border: 'none',
-            fontSize: '0.95rem',
-            fontWeight: 800,
-            cursor: startingPractice ? 'not-allowed' : 'pointer',
-            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.25)',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          {startingPractice ? <RefreshCw size={17} className="spin" /> : <Target size={18} color="#312e81" />}
-          {startingPractice ? 'Starting Practice...' : 'Practise My Weak Areas Now'}
-          <ArrowRight size={16} />
-        </button>
+        {result?.visualAnalysis?.hasVisualData && result?.visualAnalysis?.totalSamplesAnalyzed > 0 ? (
+          <>
+            {/* Visual Metrics Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+              <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: '#090d16', border: '1px solid #334155' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#818cf8', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                  <Eye size={15} /> Face Visibility
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.5rem' }}>
+                  {result.visualAnalysis.faceVisibilityPercent !== null && result.visualAnalysis.faceVisibilityPercent !== undefined ? `${Math.round(result.visualAnalysis.faceVisibilityPercent)}%` : 'N/A'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                  Of valid analysis samples
+                </div>
+              </div>
+
+              <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: '#090d16', border: '1px solid #334155' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#34d399', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                  <Camera size={15} /> Framing Suitability
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.5rem' }}>
+                  {result.visualAnalysis.framingSuitablePercent !== null && result.visualAnalysis.framingSuitablePercent !== undefined ? `${Math.round(result.visualAnalysis.framingSuitablePercent)}%` : 'N/A'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                  Centered within frame
+                </div>
+              </div>
+
+              <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: '#090d16', border: '1px solid #334155' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                  <Sun size={15} /> Lighting Adequacy
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.5rem' }}>
+                  {result.visualAnalysis.lightingAdequacyPercent !== null && result.visualAnalysis.lightingAdequacyPercent !== undefined ? `${Math.round(result.visualAnalysis.lightingAdequacyPercent)}%` : 'N/A'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                  Pixel luminance balance
+                </div>
+              </div>
+
+              <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: '#090d16', border: '1px solid #334155' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#a78bfa', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                  <Layers size={15} /> Upper Body Visibility
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f8fafc', marginTop: '0.5rem' }}>
+                  {result.visualAnalysis.upperBodyVisibilityPercent !== null && result.visualAnalysis.upperBodyVisibilityPercent !== undefined ? `${Math.round(result.visualAnalysis.upperBodyVisibilityPercent)}%` : 'N/A'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                  For posture geometry
+                </div>
+              </div>
+            </div>
+
+            {/* Evidence-Based Observations */}
+            {result.visualAnalysis.summaryFeedback && result.visualAnalysis.summaryFeedback.length > 0 && (
+              <div style={{ padding: '1.25rem', borderRadius: '0.75rem', background: '#090d16', border: '1px solid #334155' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.75rem' }}>
+                  Observed Camera & Presentation Evidence:
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', color: '#cbd5e1', fontSize: '0.85rem', lineHeight: 1.55 }}>
+                  {result.visualAnalysis.summaryFeedback.map((fb, idx) => (
+                    <li key={idx}>{fb}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ padding: '1.5rem', borderRadius: '0.75rem', background: '#090d16', border: '1px solid #334155', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+            Camera visual analysis was unavailable or camera access was disabled during this session.
+          </div>
+        )}
+
+        {/* Ethical / Privacy Safeguard Banner */}
+        <div style={{ padding: '0.85rem 1.25rem', borderRadius: '0.75rem', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.25)', fontSize: '0.8rem', color: '#c7d2fe', lineHeight: 1.5 }}>
+          <strong>Notice & Privacy Boundary:</strong> Visual presentation observations are measured locally in your browser for optional personal feedback. MockMate never infers honesty, stress, confidence, intelligence, or emotional states from facial features or movement. Naturally glancing away to think is completely normal and not penalized. Visual feedback does not alter your technical scores or hiring recommendation.
+        </div>
       </div>
 
       {/* Navigation Footer */}

@@ -70,13 +70,13 @@ export const completeInterviewApi = async (sessionId) => {
   return response.data;
 };
 
-export const getCandidateResultApi = async (sessionId) => {
-  const response = await client.get(`/api/candidate/interviews/sessions/${sessionId}/result`);
+export const submitVisualAnalysisSummaryApi = async (sessionId, data) => {
+  const response = await client.post(`/api/candidate/interviews/sessions/${sessionId}/visual-summary`, data);
   return response.data;
 };
 
-export const startPracticeWeakAreasApi = async (sessionId) => {
-  const response = await client.post(`/api/candidate/interviews/sessions/${sessionId}/practice-weak-areas`);
+export const getCandidateResultApi = async (sessionId) => {
+  const response = await client.get(`/api/candidate/interviews/sessions/${sessionId}/result`);
   return response.data;
 };
 
@@ -92,8 +92,8 @@ export default {
   getCurrentQuestionApi,
   submitAnswerApi,
   recordMediaEventApi,
+  submitVisualAnalysisSummaryApi,
   completeInterviewApi,
   getCandidateResultApi,
-  startPracticeWeakAreasApi,
   getInstructorReportApi
 };

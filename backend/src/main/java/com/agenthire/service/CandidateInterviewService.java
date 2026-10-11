@@ -417,6 +417,65 @@ public class CandidateInterviewService {
                     .distinct()
                     .collect(Collectors.toList());
 
+            // Extract historical weaknesses and priority topics from candidate's prior completed interviews
+            List<String> priorityTopics = new ArrayList<>();
+            List<Map<String, Object>> historicalWeaknesses = new ArrayList<>();
+
+            List<InterviewSession> priorCompletedSessions = allCandidateSessions.stream()
+                    .filter(s -> !s.getId().equals(session.getId()) && s.getStatus() == SessionStatus.COMPLETED)
+                    .sorted((s1, s2) -> {
+                        Instant t1 = s1.getEndedAt() != null ? s1.getEndedAt() : (s1.getStartedAt() != null ? s1.getStartedAt() : Instant.EPOCH);
+                        Instant t2 = s2.getEndedAt() != null ? s2.getEndedAt() : (s2.getStartedAt() != null ? s2.getStartedAt() : Instant.EPOCH);
+                        return t2.compareTo(t1);
+                    })
+                    .collect(Collectors.toList());
+
+            if (!priorCompletedSessions.isEmpty()) {
+                InterviewSession lastPriorSession = priorCompletedSessions.get(0);
+                InterviewReport priorReport = interviewReportRepository.findBySessionId(lastPriorSession.getId()).orElse(null);
+                if (priorReport != null) {
+                    if (priorReport.getComprehensiveAnalysisJson() != null && !priorReport.getComprehensiveAnalysisJson().isBlank()) {
+                        try {
+                            Map<String, Object> compAnalysis = objectMapper.readValue(
+                                    priorReport.getComprehensiveAnalysisJson(),
+                                    new TypeReference<Map<String, Object>>() {}
+                            );
+                            Object weakTopicsObj = compAnalysis.get("weak_topics_for_practice");
+                            if (weakTopicsObj instanceof List<?>) {
+                                for (Object t : (List<?>) weakTopicsObj) {
+                                    if (t != null && !t.toString().isBlank() && !priorityTopics.contains(t.toString())) {
+                                        priorityTopics.add(t.toString());
+                                    }
+                                }
+                            }
+                            Object weaknessesObj = compAnalysis.get("weaknesses");
+                            if (weaknessesObj instanceof List<?>) {
+                                for (Object w : (List<?>) weaknessesObj) {
+                                    if (w instanceof Map<?, ?>) {
+                                        @SuppressWarnings("unchecked")
+                                        Map<String, Object> wMap = (Map<String, Object>) w;
+                                        historicalWeaknesses.add(wMap);
+                                        Object top = wMap.get("topic");
+                                        if (top != null && !top.toString().isBlank() && !priorityTopics.contains(top.toString())) {
+                                            priorityTopics.add(top.toString());
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception ex) {
+                            log.warn("Failed to parse prior report comprehensiveAnalysisJson: {}", ex.getMessage());
+                        }
+                    }
+                    if (priorityTopics.isEmpty() && priorReport.getImprovementAreasJson() != null) {
+                        for (String imp : parseJsonArray(priorReport.getImprovementAreasJson())) {
+                            if (!imp.isBlank() && !priorityTopics.contains(imp)) {
+                                priorityTopics.add(imp);
+                            }
+                        }
+                    }
+                }
+            }
+
             String currentPerspective = null;
             if (session.getSessionTokenHash() != null && session.getSessionTokenHash().startsWith("PERSPECTIVE:")) {
                 currentPerspective = session.getSessionTokenHash().substring("PERSPECTIVE:".length());
@@ -437,6 +496,8 @@ public class CandidateInterviewService {
                     .lastCandidateAnswer(lastAnswer)
                     .perspective(currentPerspective)
                     .previousPerspectives(previousPerspectives)
+                    .priorityTopics(priorityTopics)
+                    .historicalWeaknesses(historicalWeaknesses)
                     .remainingSeconds(session.getRemainingSeconds() != null ? session.getRemainingSeconds() : 2700)
                     .build();
 
@@ -851,7 +912,19 @@ public class CandidateInterviewService {
         report.setGeneratedAt(Instant.now());
         report.setAiRecommendation(overallScore >= 75.0 ? "RECOMMENDED FOR INSTRUCTOR REVIEW" : "REQUIRES TARGETED PRACTICE");
 
+        // Link visual analysis if recorded
+        if (report.getVisualAnalysisJson() == null || report.getVisualAnalysisJson().isBlank()) {
+            for (MediaEvent me : mediaEvents) {
+                if (me.getEventType() == MediaEventType.VISUAL_ANALYSIS_SUMMARY && me.getMetadataJson() != null) {
+                    report.setVisualAnalysisJson(me.getMetadataJson());
+                    break;
+                }
+            }
+        }
+
         interviewReportRepository.save(report);
+
+        Map<String, Object> visualAnalysis = parseJsonMap(report.getVisualAnalysisJson());
 
         // Notifications
         if (candidate.getUser() != null) {
@@ -881,8 +954,64 @@ public class CandidateInterviewService {
                 .improvementAreas(distinctImprovements)
                 .questionEvaluations(qEvaluations)
                 .comprehensiveAnalysis(comprehensiveAnalysis)
+                .historicalComparison(buildHistoricalComparison(candidate, session, report))
+                .visualAnalysis(visualAnalysis)
                 .completedAt(session.getEndedAt())
                 .build();
+    }
+
+    /**
+     * Persist candidate's client-side visual presentation summary.
+     */
+    @Transactional
+    public void saveVisualSummary(UUID sessionId, SaveVisualSummaryRequest request, UUID userId) {
+        Candidate candidate = getCandidateForUserId(userId);
+        InterviewSession session = getSessionAndVerifyCandidate(sessionId, candidate);
+
+        if (request == null) {
+            return;
+        }
+
+        Map<String, Object> visualSummaryMap = new HashMap<>();
+        visualSummaryMap.put("hasVisualData", Boolean.TRUE.equals(request.getHasVisualData()));
+        visualSummaryMap.put("analysisStatus", request.getAnalysisStatus() != null ? request.getAnalysisStatus() : "COMPLETED");
+        visualSummaryMap.put("totalSamplesAnalyzed", request.getTotalSamplesAnalyzed() != null ? Math.max(0, request.getTotalSamplesAnalyzed()) : 0);
+        visualSummaryMap.put("faceVisibilityPercent", request.getFaceVisibilityPercent() != null ? Math.min(100.0, Math.max(0.0, request.getFaceVisibilityPercent())) : null);
+        visualSummaryMap.put("upperBodyVisibilityPercent", request.getUpperBodyVisibilityPercent() != null ? Math.min(100.0, Math.max(0.0, request.getUpperBodyVisibilityPercent())) : null);
+        visualSummaryMap.put("framingSuitablePercent", request.getFramingSuitablePercent() != null ? Math.min(100.0, Math.max(0.0, request.getFramingSuitablePercent())) : null);
+        visualSummaryMap.put("lightingAdequacyPercent", request.getLightingAdequacyPercent() != null ? Math.min(100.0, Math.max(0.0, request.getLightingAdequacyPercent())) : null);
+        visualSummaryMap.put("sustainedAbsenceIntervals", request.getSustainedAbsenceIntervals() != null ? Math.max(0, request.getSustainedAbsenceIntervals()) : 0);
+        visualSummaryMap.put("multipleFaceDetections", request.getMultipleFaceDetections() != null ? Math.max(0, request.getMultipleFaceDetections()) : 0);
+        visualSummaryMap.put("summaryFeedback", request.getSummaryFeedback() != null ? request.getSummaryFeedback() : Collections.emptyList());
+        visualSummaryMap.put("recordedAt", Instant.now().toString());
+        if (request.getMetadata() != null) {
+            visualSummaryMap.put("metadata", request.getMetadata());
+        }
+
+        String tempPayload;
+        try {
+            tempPayload = objectMapper.writeValueAsString(visualSummaryMap);
+        } catch (Exception e) {
+            log.error("Failed to serialize visual summary", e);
+            tempPayload = "{}";
+        }
+        final String jsonPayload = tempPayload;
+
+        MediaEvent event = MediaEvent.builder()
+                .session(session)
+                .eventType(MediaEventType.VISUAL_ANALYSIS_SUMMARY)
+                .timestamp(Instant.now())
+                .durationSeconds(request.getTotalSamplesAnalyzed() != null ? request.getTotalSamplesAnalyzed() : 0)
+                .metadataJson(jsonPayload)
+                .build();
+        mediaEventRepository.save(event);
+
+        interviewReportRepository.findBySessionId(session.getId()).ifPresent(report -> {
+            report.setVisualAnalysisJson(jsonPayload);
+            interviewReportRepository.save(report);
+        });
+
+        log.info("Saved visual analysis summary for candidate {} in session {}", candidate.getId(), sessionId);
     }
 
     /**
@@ -932,6 +1061,17 @@ public class CandidateInterviewService {
             }
         }
 
+        Map<String, Object> visualAnalysis = parseJsonMap(report.getVisualAnalysisJson());
+        if (visualAnalysis == null) {
+            List<MediaEvent> mediaEvents = mediaEventRepository.findBySessionIdOrderByTimestampAsc(session.getId());
+            for (MediaEvent me : mediaEvents) {
+                if (me.getEventType() == MediaEventType.VISUAL_ANALYSIS_SUMMARY && me.getMetadataJson() != null) {
+                    visualAnalysis = parseJsonMap(me.getMetadataJson());
+                    break;
+                }
+            }
+        }
+
         return CandidateInterviewResultDto.builder()
                 .sessionId(session.getId())
                 .interviewId(session.getInterview().getId())
@@ -952,13 +1092,125 @@ public class CandidateInterviewService {
                 .improvementAreas(parseJsonArray(report.getImprovementAreasJson()))
                 .questionEvaluations(qEvaluations)
                 .comprehensiveAnalysis(comprehensiveAnalysis)
+                .historicalComparison(buildHistoricalComparison(candidate, session, report))
+                .visualAnalysis(visualAnalysis)
                 .completedAt(session.getEndedAt())
                 .build();
     }
 
     /**
-     * Start targeted practice mode session targeting previous weak areas.
+     * Builds cross-interview progress and improvement comparison with the candidate's
+     * latest completed interview, if reliable historical data exists.
      */
+    private Map<String, Object> buildHistoricalComparison(Candidate candidate, InterviewSession currentSession, InterviewReport currentReport) {
+        if (candidate == null || currentSession == null || currentReport == null) {
+            return null;
+        }
+
+        List<InterviewSession> pastCompletedSessions = interviewSessionRepository.findByCandidateId(candidate.getId()).stream()
+                .filter(s -> !s.getId().equals(currentSession.getId()) && s.getStatus() == SessionStatus.COMPLETED)
+                .sorted((s1, s2) -> {
+                    Instant t1 = s1.getEndedAt() != null ? s1.getEndedAt() : (s1.getStartedAt() != null ? s1.getStartedAt() : Instant.EPOCH);
+                    Instant t2 = s2.getEndedAt() != null ? s2.getEndedAt() : (s2.getStartedAt() != null ? s2.getStartedAt() : Instant.EPOCH);
+                    return t2.compareTo(t1); // newest first
+                })
+                .collect(Collectors.toList());
+
+        if (pastCompletedSessions.isEmpty()) {
+            return null;
+        }
+
+        InterviewSession previousSession = pastCompletedSessions.get(0);
+        InterviewReport previousReport = interviewReportRepository.findBySessionId(previousSession.getId()).orElse(null);
+        if (previousReport == null || previousReport.getOverallScore() == null) {
+            return null;
+        }
+
+        double prevOverall = previousReport.getOverallScore();
+        double currOverall = currentReport.getOverallScore() != null ? currentReport.getOverallScore() : 0.0;
+        double overallDelta = Math.round((currOverall - prevOverall) * 10.0) / 10.0;
+
+        Double prevTech = previousReport.getTechnicalScore();
+        Double currTech = currentReport.getTechnicalScore();
+        Double techDelta = (currTech != null && prevTech != null) ? Math.round((currTech - prevTech) * 10.0) / 10.0 : 0.0;
+
+        Double prevComm = previousReport.getCommunicationScore();
+        Double currComm = currentReport.getCommunicationScore();
+        Double commDelta = (currComm != null && prevComm != null) ? Math.round((currComm - prevComm) * 10.0) / 10.0 : 0.0;
+
+        Double prevProb = previousReport.getProblemSolvingScore();
+        Double currProb = currentReport.getProblemSolvingScore();
+        Double probDelta = (currProb != null && prevProb != null) ? Math.round((currProb - prevProb) * 10.0) / 10.0 : 0.0;
+
+        List<String> previousWeakTopics = new ArrayList<>();
+        if (previousReport.getComprehensiveAnalysisJson() != null) {
+            try {
+                Map<String, Object> prevAnalysis = objectMapper.readValue(previousReport.getComprehensiveAnalysisJson(), new TypeReference<Map<String, Object>>() {});
+                Object wTop = prevAnalysis.get("weak_topics_for_practice");
+                if (wTop instanceof List<?>) {
+                    for (Object t : (List<?>) wTop) {
+                        if (t != null) previousWeakTopics.add(t.toString());
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (previousWeakTopics.isEmpty()) {
+            previousWeakTopics.addAll(parseJsonArray(previousReport.getImprovementAreasJson()));
+        }
+
+        List<CandidateAnswer> currentAnswers = candidateAnswerRepository.findBySessionIdOrderBySequenceNumberAsc(currentSession.getId());
+        List<String> improvedTopics = new ArrayList<>();
+        List<String> persistentGaps = new ArrayList<>();
+
+        for (String prevTopic : previousWeakTopics) {
+            String topicLower = prevTopic.toLowerCase();
+            boolean answeredInCurrent = false;
+            boolean scoredWell = false;
+
+            for (CandidateAnswer ans : currentAnswers) {
+                String qText = (ans.getQuestion() != null ? ans.getQuestion().getQuestionText() : "").toLowerCase();
+                String ansText = (ans.getTextAnswer() != null ? ans.getTextAnswer() : "").toLowerCase();
+                if (qText.contains(topicLower) || topicLower.contains(qText) || ansText.contains(topicLower)) {
+                    answeredInCurrent = true;
+                    AnswerEvaluation eval = answerEvaluationRepository.findByCandidateAnswerId(ans.getId()).orElse(null);
+                    if (eval != null && eval.getTechnicalScore() != null && eval.getTechnicalScore() >= 7.0) {
+                        scoredWell = true;
+                    }
+                }
+            }
+
+            if (answeredInCurrent && scoredWell) {
+                improvedTopics.add(prevTopic + " (Demonstrated solid competence this session)");
+            } else if (answeredInCurrent && !scoredWell) {
+                persistentGaps.add(prevTopic + " (Continued difficulty during exploration)");
+            } else {
+                persistentGaps.add(prevTopic + " (Recommended for future focus)");
+            }
+        }
+
+        Map<String, Object> comp = new HashMap<>();
+        comp.put("hasHistoricalData", true);
+        comp.put("previousSessionId", previousSession.getId().toString());
+        comp.put("previousInterviewTitle", previousSession.getInterview() != null ? previousSession.getInterview().getTitle() : "Mock Interview");
+        comp.put("previousCompletedAt", previousSession.getEndedAt() != null ? previousSession.getEndedAt().toString() : null);
+        comp.put("previousOverallScore", prevOverall);
+        comp.put("currentOverallScore", currOverall);
+        comp.put("overallScoreDelta", overallDelta);
+        comp.put("technicalScoreDelta", techDelta);
+        comp.put("communicationScoreDelta", commDelta);
+        comp.put("problemSolvingScoreDelta", probDelta);
+        comp.put("improvedTopics", improvedTopics);
+        comp.put("persistentGaps", persistentGaps);
+
+        return comp;
+    }
+
+    /**
+     * Start targeted practice mode session targeting previous weak areas.
+     * @deprecated Superseded by the unified adaptive default mock interview which
+     *             automatically factors in candidate's historical weaknesses.
+     */
+    @Deprecated
     @Transactional
     public StartSessionResponseDto startPracticeWeakAreasSession(UUID previousSessionId, UUID userId) {
         Candidate candidate = getCandidateForUserId(userId);
@@ -1247,6 +1499,15 @@ public class CandidateInterviewService {
             return objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
         } catch (Exception e) {
             return Collections.emptyList();
+        }
+    }
+
+    private Map<String, Object> parseJsonMap(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            return null;
         }
     }
 

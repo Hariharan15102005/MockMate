@@ -334,3 +334,71 @@ def test_15_nuanced_partial_contrast():
     assert analysis["classification"] == "PARTIAL"
     assert analysis["is_explicit_unknown"] is False
     assert "ChromaDB" in analysis["technologies_mentioned"]
+
+def test_16_historical_weaknesses_prioritize_topic():
+    """Test 16: Historical weaknesses from earlier interviews influence question topic prioritization on default interview."""
+    session_id = "test_sess_hist_16"
+    req = GenerateQuestionRequest(
+        session_id=session_id,
+        candidate_id="cand_hist",
+        round_number=2,
+        resume_context=SAMPLE_RESUME,
+        last_candidate_answer="I have built full stack applications using Spring Boot and React, and also worked with vector databases.",
+        previous_interactions=[
+            {"question": "Walk me through your background.", "topic": "INTRODUCTION", "action": "ASK_QUESTION"}
+        ],
+        priority_topics=["MySQL"],
+        historical_weaknesses=[
+            {"topic": "MySQL", "evidence": "Failed to explain database indexing and ACID transactions in earlier session", "score": 4.5}
+        ]
+    )
+    res = generate_interview_question(req)
+    # MySQL was flagged as a historical weakness and exists on the candidate's resume -> prioritized
+    assert res.action == "SWITCH_TOPIC"
+    assert "mysql" in (res.skill or "").lower() or "mysql" in (res.topic or "").lower() or "mysql" in res.question_text.lower()
+
+def test_17_strong_answer_advances_depth_despite_past_weakness():
+    """Test 17: Candidate providing strong answer on previously weak topic marks it understood and advances depth."""
+    session_id = "test_sess_hist_17"
+    _session_interview_state[session_id] = {
+        "current_topic": "MySQL",
+        "current_subtopic": "Indexing & Query Optimization",
+        "current_depth": 1,
+        "clarification_attempted": False,
+        "follow_up_count": 0,
+        "skipped_subtopics": [],
+        "unknown_topics": [],
+        "exhausted_topics": [],
+        "topics_discussed": ["MySQL"]
+    }
+    strong_ans = ("We implemented B-Tree composite indexes on candidate_id and created_at to avoid full table scans, "
+                  "and configured pessimistic locking with @Transactional isolation level READ_COMMITTED to ensure ACID consistency.")
+    req = GenerateQuestionRequest(
+        session_id=session_id,
+        candidate_id="cand_hist",
+        round_number=3,
+        resume_context=SAMPLE_RESUME,
+        last_candidate_answer=strong_ans,
+        priority_topics=["MySQL"],
+        historical_weaknesses=[{"topic": "MySQL", "score": 5.0}]
+    )
+    res = generate_interview_question(req)
+    assert res.action in ["GO_DEEPER", "EXPLORE_NEW_DETAIL"]
+    assert res.current_topic_state == "UNDERSTOOD"
+
+def test_18_missing_historical_context_works_normally():
+    """Test 18: Missing or empty historical context continues normal adaptive behavior without errors."""
+    session_id = "test_sess_hist_18"
+    req = GenerateQuestionRequest(
+        session_id=session_id,
+        candidate_id="cand_new",
+        round_number=1,
+        resume_context=SAMPLE_RESUME,
+        priority_topics=[],
+        historical_weaknesses=[]
+    )
+    res = generate_interview_question(req)
+    assert res.action == "ASK_QUESTION"
+    assert res.question_text is not None
+    assert len(res.question_text) > 0
+

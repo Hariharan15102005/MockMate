@@ -223,6 +223,7 @@ class ConversationalInterviewState(TypedDict):
     perspective_goal: Optional[str]
     previous_perspectives: List[str]
     priority_topics: List[str]
+    historical_weaknesses: List[Dict[str, Any]]
     priority_projects: List[str]
     claims_explored: List[str]
     claims_remaining: List[str]
@@ -715,11 +716,14 @@ def select_interview_perspective(
     resume_context: Dict[str, Any],
     previous_perspectives: List[str],
     requested_perspective: Optional[str] = None,
-    historical_questions: Optional[List[str]] = None
+    historical_questions: Optional[List[str]] = None,
+    historical_weaknesses: Optional[List[Dict[str, Any]]] = None,
+    priority_topics: Optional[List[str]] = None
 ) -> Tuple[str, str, List[str], List[str]]:
     """
     Selects the interview perspective dynamically based on:
     - Candidate resume contents, technologies, and projects.
+    - Historical candidate weaknesses and priority growth topics when available.
     - Previous session history to strictly avoid repeated perspectives across sessions.
     - Never uses static arrays or simple sequential rotation.
     """
@@ -776,6 +780,19 @@ def select_interview_perspective(
     scores["TECHNICAL_DEPTH"] = 82.0
     scores["PROBLEM_SOLVING"] = 80.0
 
+    # Contextual priority boost based on historical weaknesses when supported by resume
+    all_weaknesses_text = " ".join([
+        (w.get("topic") or "") + " " + (w.get("evidence") or "")
+        for w in (historical_weaknesses or []) if isinstance(w, dict)
+    ] + list(priority_topics or [])).lower()
+
+    if all_weaknesses_text:
+        for p_name, p_data in INTERVIEW_PERSPECTIVES.items():
+            if p_name in scores:
+                matching_weakness = any(area.lower() in all_weaknesses_text for area in p_data.get("preferred_areas", []))
+                if matching_weakness:
+                    scores[p_name] += 5.0  # Contextual prioritization for historical growth area
+
     # Also infer previous perspectives from historical_questions if previous_perspectives is empty
     prev_set = list(previous_perspectives or [])
     if historical_questions:
@@ -812,8 +829,6 @@ def select_interview_perspective(
         if prev_p in scores:
             recency_penalty = 100.0 + (len(prev_set) - idx) * 10.0
             scores[prev_p] -= recency_penalty
-            recency_penalty = 100.0 + (len(prev_set) - idx) * 10.0
-            scores[prev_p] -= recency_penalty
 
     # Select candidate perspective with highest score
     sorted_perspectives = sorted(scores.items(), key=lambda item: item[1], reverse=True)
@@ -838,7 +853,9 @@ def select_interview_perspective_node(state: ConversationalInterviewState) -> Di
         chosen_p, goal, p_topics, p_projects = select_interview_perspective(
             resume_context=resume_context,
             previous_perspectives=prev_perspectives,
-            historical_questions=state.get("historical_questions") or []
+            historical_questions=state.get("historical_questions") or [],
+            historical_weaknesses=state.get("historical_weaknesses") or [],
+            priority_topics=state.get("priority_topics") or []
         )
     else:
         chosen_p = current_p
@@ -846,6 +863,13 @@ def select_interview_perspective_node(state: ConversationalInterviewState) -> Di
         goal = meta["goal"]
         p_topics = meta["preferred_areas"]
         p_projects = [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Project") for p in (resume_context.get("projects") or [])]
+
+    # Preserve any incoming priority topics from candidate history ahead of generic perspective areas
+    existing_priorities = list(state.get("priority_topics") or [])
+    combined_priority_topics = list(existing_priorities)
+    for pt in p_topics:
+        if pt not in combined_priority_topics:
+            combined_priority_topics.append(pt)
 
     claims = extract_claims_from_context(resume_context)
     claims_explored = list(state.get("claims_explored") or [])
@@ -860,7 +884,7 @@ def select_interview_perspective_node(state: ConversationalInterviewState) -> Di
     return {
         "perspective": chosen_p,
         "perspective_goal": goal,
-        "priority_topics": p_topics,
+        "priority_topics": combined_priority_topics,
         "priority_projects": p_projects,
         "claims": claims,
         "claims_remaining": claims_remaining,
@@ -1311,11 +1335,37 @@ def select_next_resume_target(
 
         return True
 
+    priority_topics = [t.lower() for t in (state.get("priority_topics") or []) if t]
+    historical_weaknesses = state.get("historical_weaknesses") or []
+    weak_topic_names = [
+        (hw.get("topic") or "").lower()
+        for hw in historical_weaknesses
+        if isinstance(hw, dict) and hw.get("topic")
+    ]
+
+    def _claim_priority_weight(c: StructuredClaim) -> int:
+        tech = c.get("technology", "").lower()
+        concept = c.get("concept", "").lower()
+        subtop = (c.get("subtopic") or "").lower()
+        claim_str = f"{tech} {concept} {subtop}"
+
+        for wt in weak_topic_names:
+            if wt and (wt in claim_str or claim_str in wt or any(word in claim_str for word in wt.split() if len(word) > 3)):
+                return 3
+        for pt in priority_topics:
+            if pt and (pt in claim_str or claim_str in pt or any(word in claim_str for word in pt.split() if len(word) > 3)):
+                return 2
+        return 0
+
     eligible_claims = [c for c in claims if claim_matches(c)]
     unvisited = [
         c for c in eligible_claims
         if c.get("concept", "").lower() not in discussed and c.get("technology", "").lower() not in discussed
     ]
+
+    unvisited.sort(key=_claim_priority_weight, reverse=True)
+    eligible_claims.sort(key=_claim_priority_weight, reverse=True)
+
     chosen = unvisited[0] if unvisited else (eligible_claims[0] if eligible_claims else None)
 
     if not chosen and target_section != "TECHNICAL_SKILLS" and sec_cov.get("TECHNICAL_SKILLS", {}).get("eligible", True):
@@ -1328,6 +1378,7 @@ def select_next_resume_target(
             and (c.get("subtopic") or "").lower() not in skipped
             and c.get("technology", "").lower() not in unknown
         ]
+        eligible_claims.sort(key=_claim_priority_weight, reverse=True)
         chosen = eligible_claims[0] if eligible_claims else None
         transition_speech = "No worries, let's explore the skills listed on your resume."
 
@@ -1564,6 +1615,11 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
     reason_code = decision["reason_code"]
     allow_same_topic = decision["allow_same_topic_follow_up"]
 
+    # When transitioning from INTRODUCTION (Turn 1 opener completed)
+    if current_topic == "INTRODUCTION" and action != "SWITCH_TOPIC":
+        action = "SWITCH_TOPIC"
+        reason_code = "TRANSITION_FROM_INTRO"
+
     # 4. Handle SWITCH_TOPIC
     if action == "SWITCH_TOPIC":
         # Record skipped/unknown subtopic
@@ -1582,6 +1638,8 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             transition_msg = "Understood, that makes total sense since you weren't personally implementing that part. Let's focus on what you personally built."
         elif reason_code == "CLARIFICATION_BUDGET_EXHAUSTED":
             transition_msg = "Understood, thanks for clarifying. Let's move on to another technical component from your background."
+        elif reason_code == "TRANSITION_FROM_INTRO":
+            transition_msg = "Thanks for walking me through your background. Let's dive into the technical implementation and architecture."
         elif reason_code == "TOPIC_DEPTH_EXHAUSTED":
             if current_topic and current_topic not in exhausted_topics:
                 exhausted_topics.append(current_topic)
@@ -2873,7 +2931,8 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
         "perspective": request.perspective,
         "perspective_goal": None,
         "previous_perspectives": request.previous_perspectives or [],
-        "priority_topics": [],
+        "priority_topics": list(request.priority_topics or []),
+        "historical_weaknesses": list(request.historical_weaknesses or []),
         "priority_projects": [],
         "claims_explored": claims_explored,
         "claims_remaining": [],

@@ -520,10 +520,11 @@ export const InterviewPreCheck = () => {
             <div style={{ padding: '1.25rem', background: '#090d16', border: '1px solid #334155', borderRadius: '1rem', fontSize: '0.825rem', color: '#cbd5e1', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <div style={{ fontWeight: 700, color: '#f8fafc' }}>During this mock interview:</div>
               <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <li>Your speech is converted to text in real-time for deterministic AI rubric scoring.</li>
-                <li>Objective technical signals (camera continuity, window focus, face presence) are monitored.</li>
-                <li>No psychological guessing or emotion recognition is performed.</li>
-                <li>Your interview responses and scorecard remain accessible only to you.</li>
+                <li><strong>Voice Recognition:</strong> Your speech is transcribed in real time for multi-domain technical evaluation.</li>
+                <li><strong>Local Camera Feedback:</strong> Real-time computer vision runs strictly in your browser to evaluate camera framing, lighting adequacy, face visibility, and upper-body posture geometry.</li>
+                <li><strong>Zero Video Uploads:</strong> Raw video frames are processed on-device and never sent to external AI servers.</li>
+                <li><strong>Strict Ethical Boundaries:</strong> The system does NOT infer honesty, stress, confidence, intelligence, emotions, or personality from facial expressions or movement. Looking away while thinking is never penalized.</li>
+                <li><strong>Independence:</strong> Visual observations are provided solely as presentation coaching and do not alter technical knowledge scores.</li>
               </ul>
             </div>
 
@@ -538,7 +539,7 @@ export const InterviewPreCheck = () => {
                 style={{ marginTop: '0.2rem', width: '16px', height: '16px', cursor: 'pointer' }}
               />
               <span style={{ fontSize: '0.85rem', color: '#f8fafc', fontWeight: 600 }}>
-                I understand and consent to audio/video processing and technical compliance monitoring for this mock interview session.
+                I consent to audio processing, local camera-based presentation feedback, and technical session monitoring for this mock interview.
               </span>
             </label>
 
