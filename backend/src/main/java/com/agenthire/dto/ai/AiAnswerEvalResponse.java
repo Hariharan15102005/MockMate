@@ -13,7 +13,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AiAnswerEvalResponse {
-
+ 
     @JsonProperty("correctness_score")
     private Double correctnessScore;
 

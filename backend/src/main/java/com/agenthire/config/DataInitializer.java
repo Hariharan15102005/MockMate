@@ -17,6 +17,9 @@ import com.agenthire.entity.enums.InterviewStatus;
 import com.agenthire.entity.enums.QuestionType;
 import com.agenthire.entity.enums.UserRole;
 import com.agenthire.repository.CandidateAssignmentRepository;
+import com.agenthire.entity.Resume;
+import com.agenthire.entity.ResumeAnalysis;
+import com.agenthire.entity.enums.ResumeStatus;
 import com.agenthire.repository.CandidateRepository;
 import com.agenthire.repository.InstructorRepository;
 import com.agenthire.repository.InterviewEngineerRepository;
@@ -24,6 +27,8 @@ import com.agenthire.repository.InterviewRepository;
 import com.agenthire.repository.InterviewRoundRepository;
 import com.agenthire.repository.InterviewScoringConfigRepository;
 import com.agenthire.repository.QuestionRepository;
+import com.agenthire.repository.ResumeAnalysisRepository;
+import com.agenthire.repository.ResumeRepository;
 import com.agenthire.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +55,8 @@ public class DataInitializer implements CommandLineRunner {
     private final InterviewRoundRepository roundRepository;
     private final QuestionRepository questionRepository;
     private final InterviewScoringConfigRepository scoringConfigRepository;
+    private final ResumeRepository resumeRepository;
+    private final ResumeAnalysisRepository resumeAnalysisRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Value("${app.seed.admin.email:admin@agenthire.ai}")
@@ -92,12 +99,14 @@ public class DataInitializer implements CommandLineRunner {
         seedAdmin();
         InterviewEngineer defaultEngineer = seedEngineer();
         seedInstructor();
-        seedCandidate();
+        Candidate defaultCandidate = seedCandidate();
+        seedResumeForCandidate(defaultCandidate);
 
         if (seedDemoEnabled) {
             // Seed dedicated Demo Instructor & Candidate with complete published interview blueprint
             Instructor demoInstructor = seedDemoInstructor();
             Candidate demoCandidate = seedDemoCandidate();
+            seedResumeForCandidate(demoCandidate);
             CandidateAssignment demoAssignment = seedDemoAssignment(demoCandidate, defaultEngineer, demoInstructor);
             seedDemoInterviewBlueprint(demoCandidate, demoAssignment, demoInstructor);
         }
@@ -161,26 +170,28 @@ public class DataInitializer implements CommandLineRunner {
         }
     }
 
-    private void seedCandidate() {
-        if (!userRepository.existsByEmail(candidateEmail.toLowerCase())) {
-            User user = userRepository.save(User.builder()
+    private Candidate seedCandidate() {
+        User user = userRepository.findByEmail(candidateEmail.toLowerCase()).orElseGet(() -> {
+            User u = userRepository.save(User.builder()
                     .fullName("Hari Haran")
                     .email(candidateEmail.toLowerCase())
                     .passwordHash(passwordEncoder.encode(candidatePassword))
                     .role(UserRole.CANDIDATE)
                     .enabled(true)
                     .build());
+            log.info("Seeded default CANDIDATE account: {}", u.getEmail());
+            return u;
+        });
 
-            candidateRepository.save(Candidate.builder()
-                    .user(user)
-                    .fullName(user.getFullName())
-                    .email(user.getEmail())
-                    .appliedRole("Java Backend Developer")
-                    .status(CandidateStatus.PENDING_VERIFICATION)
-                    .build());
-
-            log.info("Seeded default CANDIDATE account: {}", user.getEmail());
-        }
+        return candidateRepository.findByEmail(candidateEmail.toLowerCase()).orElseGet(() ->
+                candidateRepository.save(Candidate.builder()
+                        .user(user)
+                        .fullName(user.getFullName())
+                        .email(user.getEmail())
+                        .appliedRole("Java Backend Developer")
+                        .status(CandidateStatus.PENDING_VERIFICATION)
+                        .build())
+        );
     }
 
     private Instructor seedDemoInstructor() {
@@ -518,5 +529,71 @@ public class DataInitializer implements CommandLineRunner {
                 .build());
 
         log.info("Successfully seeded demo interview blueprint with 8 rounds, 17 questions, and 100% scoring rubric!");
+    }
+
+    private void seedResumeForCandidate(Candidate candidate) {
+        if (candidate == null || resumeRepository.existsByCandidateId(candidate.getId())) {
+            return;
+        }
+
+        Resume resume = resumeRepository.save(Resume.builder()
+                .candidate(candidate)
+                .fileName("Hari_Haran_Resume.pdf")
+                .filePath("storage/resumes/demo/Hari_Haran_Resume.pdf")
+                .fileType("application/pdf")
+                .fileSize(204800L)
+                .uploadedBy(candidate.getUser())
+                .uploadedAt(Instant.now())
+                .version(1)
+                .isCurrent(true)
+                .status(ResumeStatus.ANALYZED)
+                .extractedText(
+                        candidate.getFullName().toUpperCase() + "\n" +
+                        "Full Stack Software Engineer | Chennai, India | " + candidate.getEmail() + " | +91 9876543210\n\n" +
+                        "EDUCATION\n" +
+                        "Anna University — B.Tech in Computer Science and Engineering (2020 - 2024) | GPA: 8.8/10\n\n" +
+                        "TECHNICAL SKILLS\n" +
+                        "Languages: Java, JavaScript, Python, SQL\n" +
+                        "Frameworks & Libraries: Spring Boot, React, LangChain, Hibernate\n" +
+                        "Databases: MySQL, ChromaDB (Vector Store), Redis\n" +
+                        "Tools & Cloud: Docker, Git, REST APIs, JWT, Maven, Linux\n\n" +
+                        "PROJECTS\n" +
+                        "LearnSphere — AI-Powered Learning Experience Platform\n" +
+                        "- Architected a full-stack educational system using Spring Boot, React, MySQL, and a Retrieval-Augmented Generation (RAG) assistant.\n" +
+                        "- Designed high-throughput RESTful backend APIs with Spring Boot, handling authentication, course catalog, and submission endpoints.\n" +
+                        "- Built a custom RAG pipeline integrating LangChain and ChromaDB for vector retrieval of lecture notes and textbook embeddings.\n" +
+                        "- Implemented stateless JWT security with role-based access control (RBAC) and data protection.\n" +
+                        "- Modeled relational MySQL schema with composite indexing and transaction boundaries for reliable enrollment and grading.\n" +
+                        "- Developed reactive, responsive client components in React with modular state management and real-time query feedback.\n\n" +
+                        "EXPERIENCE\n" +
+                        "TechCorp Solutions — Software Engineering Intern (Jan 2024 - Jun 2024)\n" +
+                        "- Contributed to microservices development using Java and Spring Boot.\n" +
+                        "- Optimized database queries in MySQL, reducing API latency by 35%.\n" +
+                        "- Participated in code reviews, CI/CD pipelines with Docker, and unit testing with JUnit."
+                )
+                .build());
+
+        resumeAnalysisRepository.save(ResumeAnalysis.builder()
+                .resume(resume)
+                .summary("Full Stack Software Engineer with expertise in Java, Spring Boot, React, MySQL, and RAG pipelines using LangChain and ChromaDB. Proven experience building scalable REST microservices and intelligent retrieval systems.")
+                .skillsJson("[\"Java\",\"Spring Boot\",\"React\",\"MySQL\",\"RAG\",\"LangChain\",\"ChromaDB\",\"JWT\",\"REST APIs\",\"Docker\",\"Git\",\"Redis\"]")
+                .languagesJson("[\"Java\",\"JavaScript\",\"Python\",\"SQL\"]")
+                .frameworksJson("[\"Spring Boot\",\"React\",\"LangChain\",\"Hibernate\"]")
+                .databasesJson("[\"MySQL\",\"ChromaDB\",\"Redis\"]")
+                .toolsJson("[\"Docker\",\"Git\",\"Maven\",\"Linux\"]")
+                .educationJson("[{\"degree\":\"B.Tech\",\"field\":\"Computer Science and Engineering\",\"institution\":\"Anna University\",\"graduationYear\":\"2024\"}]")
+                .experienceJson("[{\"role\":\"Software Engineering Intern\",\"company\":\"TechCorp Solutions\",\"description\":\"Developed Spring Boot APIs, optimized MySQL queries, and built vector retrieval features.\"}]")
+                .projectsJson("[{\"name\":\"LearnSphere\",\"title\":\"LearnSphere — AI-Powered Learning Experience Platform\",\"technologies\":[\"Spring Boot\",\"React\",\"MySQL\",\"RAG\",\"LangChain\",\"ChromaDB\",\"JWT\"],\"description\":\"Full stack learning platform with Spring Boot REST APIs, React frontend, and a RAG pipeline leveraging LangChain and ChromaDB vector store for semantic content retrieval.\"}]")
+                .certificationsJson("[\"Oracle Certified Associate Java Programmer\"]")
+                .strengthAreasJson("[\"Full Stack Architecture\",\"Spring Boot Microservices\",\"RAG Pipeline Implementation\",\"Vector Retrieval with ChromaDB\",\"Relational Database Optimization\"]")
+                .potentialGapsJson("[\"Distributed cloud orchestration at multi-million scale\"]")
+                .roleRelevanceScore(92.0)
+                .roleRelevanceReason("Strong match for Full Stack Software Engineer role with demonstrated expertise in Java, Spring Boot, React, and modern AI/RAG architectures.")
+                .rawAnalysisJson("{}")
+                .analyzedAt(Instant.now())
+                .analysisVersion("1.0.0")
+                .build());
+
+        log.info("Seeded analyzed Resume & ResumeAnalysis for candidate: {}", candidate.getEmail());
     }
 }

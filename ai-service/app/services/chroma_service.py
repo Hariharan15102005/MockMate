@@ -5,12 +5,40 @@ from typing import List, Dict, Any, Optional
 import chromadb
 from chromadb.config import Settings
 
+import math
+import hashlib
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+
 logger = logging.getLogger(__name__)
 
 CHROMA_PERSIST_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "chroma_db")
 )
-COLLECTION_NAME = "mockmate_candidate_resumes"
+COLLECTION_NAME = "mockmate_candidate_resumes_v2"
+
+class DeterministicResumeEmbeddingFunction(EmbeddingFunction[Documents]):
+    """
+    Deterministic 128-dimensional offline token hashing embedding function.
+    Guarantees instant vectorization without external downloads or network hangs on Windows.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, input: Documents) -> Embeddings:
+        embeddings = []
+        for text in input:
+            vec = [0.0] * 128
+            tokens = re.findall(r"\w+", text.lower())
+            for token in tokens:
+                h = int(hashlib.md5(token.encode('utf-8')).hexdigest(), 16)
+                idx = h % 128
+                val = 1.0 if (h % 2 == 0) else -1.0
+                vec[idx] += val
+            norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+            embeddings.append([x / norm for x in vec])
+        return embeddings
+
+_embedding_function = DeterministicResumeEmbeddingFunction()
 
 _chroma_client = None
 _resume_collection = None
@@ -22,6 +50,7 @@ def get_chroma_client():
             _chroma_client = chromadb.Client()
             _resume_collection = _chroma_client.get_or_create_collection(
                 name=COLLECTION_NAME,
+                embedding_function=_embedding_function,
                 metadata={"hnsw:space": "cosine"}
             )
             return _resume_collection
@@ -30,6 +59,7 @@ def get_chroma_client():
             _chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
             _resume_collection = _chroma_client.get_or_create_collection(
                 name=COLLECTION_NAME,
+                embedding_function=_embedding_function,
                 metadata={"hnsw:space": "cosine"}
             )
             logger.info(f"ChromaDB initialized at: {CHROMA_PERSIST_DIR}")
@@ -38,6 +68,7 @@ def get_chroma_client():
             _chroma_client = chromadb.Client()
             _resume_collection = _chroma_client.get_or_create_collection(
                 name=COLLECTION_NAME,
+                embedding_function=_embedding_function,
                 metadata={"hnsw:space": "cosine"}
             )
     return _resume_collection
@@ -329,7 +360,10 @@ def retrieve_relevant_resume_knowledge(
     candidate_id_str = str(candidate_id)
 
     try:
-        where_filter: Dict[str, Any] = {"candidate_id": candidate_id_str}
+        if resume_id and str(resume_id) not in ["None", "current_active_resume", ""]:
+            where_filter: Dict[str, Any] = {"$and": [{"candidate_id": candidate_id_str}, {"resume_id": str(resume_id)}]}
+        else:
+            where_filter: Dict[str, Any] = {"candidate_id": candidate_id_str}
         
         # Check if collection has documents for candidate
         count = collection.count()

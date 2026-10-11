@@ -257,79 +257,86 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             p_desc = p.get("description") or ""
             p_techs = p.get("technologies") or []
             p_text = f"{p_name} {p_desc} {' '.join(p_techs)}".lower()
+        elif isinstance(p, str):
+            p_name = p
+            p_desc = ""
+            p_techs = []
+            p_text = p.lower()
+        else:
+            continue
 
-            if any(k in p_text for k in ["spring", "backend", "microservice", "rest", "api"]):
-                claims.append({
-                    "claim": f"Engineered scalable REST APIs and backend microservices using Spring Boot in {p_name}",
-                    "technology": "Spring Boot",
-                    "concept": "REST_ARCHITECTURE",
-                    "project": p_name,
-                    "claim_type": "implementation",
-                    "strength": "scalability"
-                })
-            if any(k in p_text for k in ["rag", "chroma", "vector", "langchain", "embeddings", "llm", "ai"]):
-                claims.append({
-                    "claim": f"Architected RAG retrieval pipeline with ChromaDB vector store in {p_name}",
-                    "technology": "ChromaDB",
-                    "concept": "RAG_RETRIEVAL",
-                    "project": p_name,
-                    "claim_type": "architecture",
-                    "strength": "ai_integration"
-                })
-            if any(k in p_text for k in ["react", "frontend", "redux", "ui"]):
-                claims.append({
-                    "claim": f"Developed interactive UI components and state management in {p_name} using React",
-                    "technology": "React",
-                    "concept": "STATE_MANAGEMENT",
-                    "project": p_name,
-                    "claim_type": "implementation",
-                    "strength": "user_experience"
-                })
-            if any(k in p_text for k in ["sql", "mysql", "postgres", "database", "query"]):
-                claims.append({
-                    "claim": f"Designed relational database schema, indexing, and transactional queries for {p_name}",
-                    "technology": "MySQL",
-                    "concept": "QUERY_OPTIMIZATION",
-                    "project": p_name,
-                    "claim_type": "optimization",
-                    "strength": "performance"
-                })
-            if any(k in p_text for k in ["jwt", "auth", "security", "token", "oauth"]):
-                claims.append({
-                    "claim": f"Implemented stateless JWT token authentication and endpoint security in {p_name}",
-                    "technology": "JWT",
-                    "concept": "JWT_AUTHENTICATION",
-                    "project": p_name,
-                    "claim_type": "security",
-                    "strength": "data_protection"
-                })
-            if any(k in p_text for k in ["vision", "cnn", "tensorflow", "opencv", "computer vision", "defect", "image", "neural"]):
-                claims.append({
-                    "claim": f"Trained custom convolutional neural network models and real-time computer vision inference in {p_name}",
-                    "technology": "TensorFlow",
-                    "concept": "COMPUTER_VISION_CNN",
-                    "project": p_name,
-                    "claim_type": "model_engineering",
-                    "strength": "accuracy"
-                })
-            if any(k in p_text for k in ["redis", "cache"]):
-                claims.append({
-                    "claim": f"Implemented distributed Redis caching to accelerate endpoint throughput in {p_name}",
-                    "technology": "Redis",
-                    "concept": "CACHING_STRATEGY",
-                    "project": p_name,
-                    "claim_type": "optimization",
-                    "strength": "latency"
-                })
-            if any(k in p_text for k in ["docker", "kubernetes", "container", "ci/cd"]):
-                claims.append({
-                    "claim": f"Containerized application workloads and orchestrated deployments in {p_name}",
-                    "technology": "Docker",
-                    "concept": "CONTAINERIZATION",
-                    "project": p_name,
-                    "claim_type": "infrastructure",
-                    "strength": "reliability"
-                })
+        if any(k in p_text for k in ["spring", "backend", "microservice", "rest", "api"]):
+            claims.append({
+                "claim": f"Engineered scalable REST APIs and backend microservices using Spring Boot in {p_name}",
+                "technology": "Spring Boot",
+                "concept": "REST_ARCHITECTURE",
+                "project": p_name,
+                "claim_type": "implementation",
+                "strength": "scalability"
+            })
+        if any(k in p_text for k in ["rag", "chroma", "vector", "langchain", "embeddings", "llm", "ai"]):
+            claims.append({
+                "claim": f"Architected RAG retrieval pipeline with ChromaDB vector store in {p_name}",
+                "technology": "ChromaDB",
+                "concept": "RAG_RETRIEVAL",
+                "project": p_name,
+                "claim_type": "architecture",
+                "strength": "ai_integration"
+            })
+        if any(k in p_text for k in ["react", "frontend", "redux", "ui"]):
+            claims.append({
+                "claim": f"Developed interactive UI components and state management in {p_name} using React",
+                "technology": "React",
+                "concept": "STATE_MANAGEMENT",
+                "project": p_name,
+                "claim_type": "implementation",
+                "strength": "user_experience"
+            })
+        if any(k in p_text for k in ["sql", "mysql", "postgres", "database", "query"]):
+            claims.append({
+                "claim": f"Designed relational database schema, indexing, and transactional queries for {p_name}",
+                "technology": "MySQL",
+                "concept": "QUERY_OPTIMIZATION",
+                "project": p_name,
+                "claim_type": "optimization",
+                "strength": "performance"
+            })
+        if any(k in p_text for k in ["jwt", "auth", "security", "token", "oauth"]):
+            claims.append({
+                "claim": f"Implemented stateless JWT token authentication and endpoint security in {p_name}",
+                "technology": "JWT",
+                "concept": "JWT_AUTHENTICATION",
+                "project": p_name,
+                "claim_type": "security",
+                "strength": "data_protection"
+            })
+        if any(k in p_text for k in ["vision", "cnn", "tensorflow", "opencv", "computer vision", "defect", "image", "neural"]):
+            claims.append({
+                "claim": f"Trained custom convolutional neural network models and real-time computer vision inference in {p_name}",
+                "technology": "TensorFlow",
+                "concept": "COMPUTER_VISION_CNN",
+                "project": p_name,
+                "claim_type": "model_engineering",
+                "strength": "accuracy"
+            })
+        if any(k in p_text for k in ["redis", "cache"]):
+            claims.append({
+                "claim": f"Implemented distributed Redis caching to accelerate endpoint throughput in {p_name}",
+                "technology": "Redis",
+                "concept": "CACHING_STRATEGY",
+                "project": p_name,
+                "claim_type": "optimization",
+                "strength": "latency"
+            })
+        if any(k in p_text for k in ["docker", "kubernetes", "container", "ci/cd"]):
+            claims.append({
+                "claim": f"Containerized application workloads and orchestrated deployments in {p_name}",
+                "technology": "Docker",
+                "concept": "CONTAINERIZATION",
+                "project": p_name,
+                "claim_type": "infrastructure",
+                "strength": "reliability"
+            })
 
     for s in skills:
         s_str = str(s).strip()
@@ -396,12 +403,20 @@ def select_interview_perspective(
     """
     if requested_perspective and requested_perspective in INTERVIEW_PERSPECTIVES:
         p_info = INTERVIEW_PERSPECTIVES[requested_perspective]
-        return requested_perspective, p_info["goal"], p_info["preferred_areas"], [p.get("title", "Project") for p in resume_context.get("projects", [])]
+        p_names = [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Project") for p in (resume_context.get("projects") or [])]
+        return requested_perspective, p_info["goal"], p_info["preferred_areas"], p_names
 
     # Combine resume text representation
     projects = resume_context.get("projects") or []
     skills = [str(s).lower() for s in (resume_context.get("skills") or [])]
-    project_text = " ".join([f"{p.get('title', '')} {p.get('description', '')} {' '.join(p.get('technologies', []))}" for p in projects]).lower()
+    def _project_text(p):
+        if isinstance(p, str):
+            return p
+        if isinstance(p, dict):
+            techs = " ".join(p.get("technologies", [])) if isinstance(p.get("technologies"), list) else str(p.get("technologies", ""))
+            return f"{p.get('title', '')} {p.get('name', '')} {p.get('description', '')} {techs}"
+        return str(p)
+    project_text = " ".join([_project_text(p) for p in projects]).lower()
     full_text = f"{' '.join(skills)} {project_text}"
 
     # Score each perspective based on resume evidence
@@ -443,20 +458,32 @@ def select_interview_perspective(
     prev_set = list(previous_perspectives or [])
     if historical_questions:
         hq_lower = " ".join(historical_questions).lower()
-        if ("rag" in hq_lower or "chromadb" in hq_lower) and "AI_ML_DEPTH" not in prev_set:
+        if any(k in hq_lower for k in ["rag", "chromadb", "ai ml depth", "ai_ml_depth", "vector retrieval", "embeddings"]) and "AI_ML_DEPTH" not in prev_set:
             prev_set.append("AI_ML_DEPTH")
-        if ("overall system architecture" in hq_lower or "service boundaries" in hq_lower) and "SYSTEM_ARCHITECTURE" not in prev_set:
+        if any(k in hq_lower for k in ["overall system architecture", "service boundaries", "system_architecture", "system architecture", "overall architecture"]) and "SYSTEM_ARCHITECTURE" not in prev_set:
             prev_set.append("SYSTEM_ARCHITECTURE")
-        if ("personally build" in hq_lower or "hands-on personal" in hq_lower) and "PROJECT_OWNERSHIP" not in prev_set:
+        if any(k in hq_lower for k in ["personally build", "hands-on personal", "project_ownership", "project ownership", "personally own", "personal involvement"]) and "PROJECT_OWNERSHIP" not in prev_set:
             prev_set.append("PROJECT_OWNERSHIP")
-        if ("jwt" in hq_lower or "token validation" in hq_lower) and "SECURITY" not in prev_set:
+        if any(k in hq_lower for k in ["jwt", "token validation", "security", "authorization", "endpoint protection"]) and "SECURITY" not in prev_set:
             prev_set.append("SECURITY")
-        if ("database schema" in hq_lower or "table indexing" in hq_lower) and "DATABASE_ENGINEERING" not in prev_set:
+        if any(k in hq_lower for k in ["database schema", "table indexing", "database_engineering", "database engineering", "transactional integrity"]) and "DATABASE_ENGINEERING" not in prev_set:
             prev_set.append("DATABASE_ENGINEERING")
-        if ("deployment" in hq_lower or "containerization" in hq_lower) and "PRODUCTION_ENGINEERING" not in prev_set:
+        if any(k in hq_lower for k in ["containerization", "production_engineering", "production engineering", "production monitoring"]) and "PRODUCTION_ENGINEERING" not in prev_set:
             prev_set.append("PRODUCTION_ENGINEERING")
-        if ("tenfold" in hq_lower or "bottleneck first" in hq_lower) and "SCALABILITY" not in prev_set:
+        if any(k in hq_lower for k in ["tenfold", "bottleneck first", "scalability", "spiked tenfold"]) and "SCALABILITY" not in prev_set:
             prev_set.append("SCALABILITY")
+        if any(k in hq_lower for k in ["memory models", "technical_depth", "technical depth", "underlying execution"]) and "TECHNICAL_DEPTH" not in prev_set:
+            prev_set.append("TECHNICAL_DEPTH")
+        if any(k in hq_lower for k in ["difficult bug", "problem_solving", "problem solving", "root cause"]) and "PROBLEM_SOLVING" not in prev_set:
+            prev_set.append("PROBLEM_SOLVING")
+
+        # If a full prior session of 5 questions was completed, ensure at least one perspective is marked as used
+        num_completed_sessions = len(historical_questions) // 5
+        while len(prev_set) < num_completed_sessions:
+            for p_cand in ["AI_ML_DEPTH", "SYSTEM_ARCHITECTURE", "PROJECT_OWNERSHIP", "SECURITY", "DATABASE_ENGINEERING"]:
+                if p_cand not in prev_set and p_cand in scores:
+                    prev_set.append(p_cand)
+                    break
 
     # Apply penalty for previously explored perspectives to guarantee cross-session diversity!
     for idx, prev_p in enumerate(prev_set):
@@ -471,7 +498,7 @@ def select_interview_perspective(
     chosen_perspective = sorted_perspectives[0][0] if sorted_perspectives else "SYSTEM_ARCHITECTURE"
 
     p_meta = INTERVIEW_PERSPECTIVES[chosen_perspective]
-    project_names = [p.get("title") or p.get("name") or "Featured Project" for p in projects if isinstance(p, dict)]
+    project_names = [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Featured Project") for p in projects]
     priority_topics = p_meta["preferred_areas"]
 
     logger.info(f"[PERSPECTIVE ENGINE] Selected Perspective: {chosen_perspective} (Scores: {scores})")
@@ -496,7 +523,7 @@ def select_interview_perspective_node(state: ConversationalInterviewState) -> Di
         meta = INTERVIEW_PERSPECTIVES.get(chosen_p, INTERVIEW_PERSPECTIVES["SYSTEM_ARCHITECTURE"])
         goal = meta["goal"]
         p_topics = meta["preferred_areas"]
-        p_projects = [p.get("title", "Project") for p in resume_context.get("projects", [])]
+        p_projects = [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Project") for p in (resume_context.get("projects") or [])]
 
     claims = extract_claims_from_context(resume_context)
     claims_explored = list(state.get("claims_explored") or [])
@@ -714,7 +741,7 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
     historical_questions = state.get("historical_questions") or []
 
     claims = extract_claims_from_context(resume_context)
-    projects = state.get("priority_projects") or [p.get("title", "Project") for p in resume_context.get("projects", [])]
+    projects = state.get("priority_projects") or [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Project") for p in (resume_context.get("projects") or [])]
     project = projects[0] if projects else "Project"
 
     current_topic = state.get("current_topic")
@@ -951,65 +978,62 @@ def generate_natural_interview_question_node(state: ConversationalInterviewState
 
     p_name = project or "your project"
 
-    # Turn 1: Warm human opener tailored to the selected perspective
+    # Turn 1: Warm human greeting and background overview (PART 21 & PART 22)
     if round_number == 1 and not last_ans:
-        openers_by_perspective = {
-            "AI_ML_DEPTH": (
-                f"To kick off our technical discussion on AI systems in {p_name}, what role did RAG and vector retrieval play in the architecture?",
-                f"Good morning, {candidate_name}. To begin our technical discussion focusing on AI engineering, could you walk me through the RAG and vector retrieval architecture in {p_name}?"
-            ),
-            "SYSTEM_ARCHITECTURE": (
-                f"Looking at {p_name}, could you walk me through how you structured the overall system architecture and service boundaries?",
-                f"Welcome, {candidate_name}! Looking across your projects, could you walk me through how you structured the architecture and service boundaries in {p_name}?"
-            ),
-            "PROJECT_OWNERSHIP": (
-                f"Of the projects on your resume, which one did you have the most hands-on personal involvement in, and what did you personally build?",
-                f"Good morning, {candidate_name}. Looking across your background, which project did you have the deepest personal involvement in, and what part did you personally own?"
-            ),
-            "SECURITY": (
-                f"In {p_name}, how did you approach JWT authentication, token validation, and API security?",
-                f"Great to speak with you, {candidate_name}. To begin our discussion on software security, how did you structure JWT authentication and endpoint protection in {p_name}?"
-            ),
-            "DATABASE_ENGINEERING": (
-                f"In {p_name}, how did you design the database schema, table indexing, and query performance in {skill}?",
-                f"Welcome, {candidate_name}! Looking at your database engineering work in {p_name}, how did you approach schema design, indexing, and transactional integrity?"
-            ),
-            "PRODUCTION_ENGINEERING": (
-                f"Looking at {p_name}, how did you handle deployment, containerization, and production monitoring?",
-                f"Hello {candidate_name}! Looking at your work with {p_name}, how did you approach containerized deployment, logging, and production monitoring?"
-            ),
-            "SCALABILITY": (
-                f"Suppose traffic to {p_name} increases tenfold overnight. What part of your current architecture becomes the bottleneck first?",
-                f"Good morning, {candidate_name}! If user traffic to {p_name} spiked tenfold overnight, what architectural component would you scale first?"
-            ),
-            "TECHNICAL_DEPTH": (
-                f"Looking at your core work with {skill} on {p_name}, how do the underlying execution and memory models behave under load?",
-                f"Hi {candidate_name}! Looking at your core technical work with {skill} on {p_name}, how does your architecture behave under heavy load?"
-            )
-        }
+        opener_q = f"Good morning, {candidate_name}. How are you doing today? Before we get into the technical side, could you briefly walk me through your background and what you've been working on recently?"
+        full_speech = f"Good morning, {candidate_name}! How are you doing today? Before we get into the technical side, could you briefly walk me through your background and what you've been working on recently?"
         
-        chosen_pair = openers_by_perspective.get(perspective)
-        if not chosen_pair:
-            chosen_pair = (
-                f"Could you introduce yourself and walk me through your engineering contributions on {p_name}?",
-                f"Good morning, {candidate_name}. Could you introduce yourself and walk me through your engineering contributions on {p_name}?"
-            )
-        opener_q, full_speech = chosen_pair
-        
-        # If already asked in a prior session, pick general introduction variant
+        # If already asked in a prior session, pick perspective-specific kickoff or alternative variant
         if normalize_fingerprint(opener_q) in seen_fingerprints:
-            gen_openers = [
-                (f"Could you introduce yourself and walk me through the key features you built in {p_name}?",
-                 f"Good morning, {candidate_name}. Could you introduce yourself and walk me through the key features you built in {p_name}?"),
-                (f"Which technical achievement in {p_name} are you most proud of from an engineering standpoint?",
-                 f"Welcome, {candidate_name}! Which technical achievement in {p_name} are you most proud of from an engineering standpoint?"),
-                (f"Could you give me a brief walkthrough of your background and what you built on {p_name}?",
-                 f"Hello {candidate_name}, great to meet you. Could you give me a brief walkthrough of your background and what you built on {p_name}?")
-            ]
-            for oq, fs in gen_openers:
-                if normalize_fingerprint(oq) not in seen_fingerprints:
-                    opener_q, full_speech = oq, fs
-                    break
+            perspective_openers = {
+                "AI_ML_DEPTH": (
+                    f"To kick off our technical discussion on AI systems in {p_name}, what role did RAG and vector retrieval play in the architecture?",
+                    f"Good morning, {candidate_name}. To begin our technical discussion focusing on AI engineering, could you walk me through the RAG and vector retrieval architecture in {p_name}?"
+                ),
+                "SYSTEM_ARCHITECTURE": (
+                    f"Looking at {p_name}, could you walk me through how you structured the overall system architecture and service boundaries?",
+                    f"Welcome back, {candidate_name}! Looking across your projects, could you walk me through how you structured the architecture and service boundaries in {p_name}?"
+                ),
+                "PROJECT_OWNERSHIP": (
+                    f"Of the projects on your resume, which one did you have the most hands-on personal involvement in, and what did you personally build?",
+                    f"Good morning, {candidate_name}. Looking across your background, which project did you have the deepest personal involvement in, and what part did you personally own?"
+                ),
+                "SECURITY": (
+                    f"In {p_name}, how did you approach JWT authentication, token validation, and API security?",
+                    f"Great to speak with you again, {candidate_name}. To begin our discussion on software security, how did you structure JWT authentication and endpoint protection in {p_name}?"
+                ),
+                "DATABASE_ENGINEERING": (
+                    f"In {p_name}, how did you design the database schema, table indexing, and query performance in {skill}?",
+                    f"Welcome, {candidate_name}! Looking at your database engineering work in {p_name}, how did you approach schema design, indexing, and transactional integrity?"
+                ),
+                "PRODUCTION_ENGINEERING": (
+                    f"Looking at {p_name}, how did you handle deployment, containerization, and production monitoring?",
+                    f"Hello {candidate_name}! Looking at your work with {p_name}, how did you approach containerized deployment, logging, and production monitoring?"
+                ),
+                "SCALABILITY": (
+                    f"Suppose traffic to {p_name} increases tenfold overnight. What part of your current architecture becomes the bottleneck first?",
+                    f"Good morning, {candidate_name}! If user traffic to {p_name} spiked tenfold overnight, what architectural component would you scale first?"
+                ),
+                "TECHNICAL_DEPTH": (
+                    f"Looking at your core work with {skill} on {p_name}, how do the underlying execution and memory models behave under load?",
+                    f"Hi {candidate_name}! Looking at your core technical work with {skill} on {p_name}, how does your architecture behave under heavy load?"
+                )
+            }
+            if perspective in perspective_openers and normalize_fingerprint(perspective_openers[perspective][0]) not in seen_fingerprints:
+                opener_q, full_speech = perspective_openers[perspective]
+            else:
+                gen_openers = [
+                    (f"Could you introduce yourself and walk me through the key features you built in {p_name}?",
+                     f"Good morning, {candidate_name}. Could you introduce yourself and walk me through the key features you built in {p_name}?"),
+                    (f"Which technical achievement in {p_name} are you most proud of from an engineering standpoint?",
+                     f"Welcome, {candidate_name}! Which technical achievement in {p_name} are you most proud of from an engineering standpoint?"),
+                    (f"Could you give me a brief walkthrough of your background and what you built on {p_name}?",
+                     f"Hello {candidate_name}, great to meet you. Could you give me a brief walkthrough of your background and what you built on {p_name}?")
+                ]
+                for oq, fs in gen_openers:
+                    if normalize_fingerprint(oq) not in seen_fingerprints:
+                        opener_q, full_speech = oq, fs
+                        break
 
         return {
             "generated_turn": {
