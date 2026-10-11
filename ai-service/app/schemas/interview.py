@@ -46,6 +46,10 @@ class GenerateQuestionResponse(BaseModel):
     current_topic_state: Optional[str] = None
     reason_code: Optional[str] = None
     skipped_subtopics: Optional[List[str]] = []
+    section: Optional[str] = None
+    context_type: Optional[str] = None
+    section_coverage: Optional[Dict[str, Any]] = None
+    project_coverage: Optional[Dict[str, Any]] = None
 
 class EvaluateAnswerRequest(BaseModel):
     session_id: str

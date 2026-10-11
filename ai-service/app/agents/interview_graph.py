@@ -165,6 +165,8 @@ class StructuredClaim(TypedDict):
     concept: str
     subtopic: Optional[str]
     project: Optional[str]
+    section: Optional[str] # PROJECTS, TECHNICAL_SKILLS, EXPERIENCE, EDUCATION, CERTIFICATIONS
+    context_type: Optional[str] # PROJECT_CONTEXT, SKILL_CONTEXT, EXPERIENCE_CONTEXT, EDUCATION_CONTEXT, CERTIFICATION_CONTEXT
     claim_type: str
     strength: str
 
@@ -197,6 +199,9 @@ class InterviewPlan(TypedDict):
     allow_same_topic_follow_up: bool
     clarification_attempted: bool
     reason_code: Optional[str]
+    section: Optional[str]
+    context_type: Optional[str]
+    selection_level: Optional[str] # SUBTOPIC, PROJECT_OR_ITEM, RESUME_SECTION, END_INTERVIEW
 
 class ConversationalInterviewState(TypedDict):
     session_id: str
@@ -237,6 +242,11 @@ class ConversationalInterviewState(TypedDict):
     allow_same_topic_follow_up: bool
     reason_code: Optional[str]
     topics_discussed: List[str]
+    current_section: Optional[str]
+    current_project: Optional[str]
+    current_context_type: Optional[str]
+    section_coverage: Dict[str, Dict[str, Any]]
+    project_coverage: Dict[str, Dict[str, Any]]
     plan: Optional[InterviewPlan]
     generated_turn: Optional[Dict[str, Any]]
     errors: List[str]
@@ -261,35 +271,105 @@ def normalize_fingerprint(text: str) -> str:
     tokens.sort()
     return " ".join(tokens)
 
+def build_resume_section_inventory(resume_context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Builds a complete, normalized inventory of sections genuinely present in the candidate's resume.
+    Ensures missing sections are flagged as UNAVAILABLE and never hallucinated.
+    """
+    inventory: Dict[str, Any] = {
+        "PROJECTS": [],
+        "TECHNICAL_SKILLS": [],
+        "EXPERIENCE": [],
+        "EDUCATION": [],
+        "CERTIFICATIONS": [],
+        "SUMMARY": ""
+    }
+
+    # 1. Projects
+    projects = resume_context.get("projects") or []
+    for p in projects:
+        if isinstance(p, dict) and (p.get("title") or p.get("name")):
+            p_clean = dict(p)
+            p_clean["name"] = p.get("name") or p.get("title") or "Featured Project"
+            inventory["PROJECTS"].append(p_clean)
+        elif isinstance(p, str) and p.strip():
+            inventory["PROJECTS"].append({"name": p.strip(), "description": "", "technologies": []})
+
+    # 2. Technical Skills: aggregate from skills, languages, frameworks, databases, tools
+    skill_items: List[str] = []
+    for key in ["skills", "languages", "frameworks", "databases", "tools"]:
+        items = resume_context.get(key) or []
+        for it in items:
+            it_str = str(it).strip()
+            if it_str and not any(it_str.lower() == existing.lower() for existing in skill_items):
+                skill_items.append(it_str)
+    inventory["TECHNICAL_SKILLS"] = skill_items
+
+    # 3. Experience / Internships
+    experiences = resume_context.get("experience") or []
+    for exp in experiences:
+        if isinstance(exp, dict) and (exp.get("role") or exp.get("company") or exp.get("description")):
+            inventory["EXPERIENCE"].append(exp)
+
+    # 4. Education
+    education = resume_context.get("education") or []
+    for edu in education:
+        if isinstance(edu, dict) and (edu.get("degree") or edu.get("institution") or edu.get("field")):
+            inventory["EDUCATION"].append(edu)
+
+    # 5. Certifications
+    certs = resume_context.get("certifications") or []
+    for cert in certs:
+        cert_str = str(cert).strip()
+        if cert_str and not any(cert_str.lower() == existing.lower() for existing in inventory["CERTIFICATIONS"]):
+            inventory["CERTIFICATIONS"].append(cert_str)
+
+    # 6. Summary
+    inventory["SUMMARY"] = resume_context.get("summary") or ""
+
+    return inventory
+
 def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[StructuredClaim]:
     """
-    Extracts structured claims from projects, experience, and skills in resume.
+    Extracts multi-level structured claims across independent resume sections:
+    - PROJECTS: Project-specific architectural and implementation claims (PROJECT_CONTEXT)
+    - TECHNICAL_SKILLS: Listed skills independent of any project (SKILL_CONTEXT)
+    - EXPERIENCE: Professional internship and work experience claims (EXPERIENCE_CONTEXT)
+    - EDUCATION: Academic coursework and computer science fundamentals (EDUCATION_CONTEXT)
+    - CERTIFICATIONS: Technical certification claims (CERTIFICATION_CONTEXT)
     """
     claims: List[StructuredClaim] = []
-    projects = resume_context.get("projects") or []
-    skills = resume_context.get("skills") or []
+    inventory = build_resume_section_inventory(resume_context)
 
-    for p in projects:
-        if isinstance(p, dict):
-            p_name = p.get("title") or p.get("name") or "Featured Project"
-            p_desc = p.get("description") or ""
-            p_techs = p.get("technologies") or []
-            p_text = f"{p_name} {p_desc} {' '.join(p_techs)}".lower()
-        elif isinstance(p, str):
-            p_name = p
-            p_desc = ""
-            p_techs = []
-            p_text = p.lower()
-        else:
-            continue
+    # 1. Extract PROJECTS claims
+    for p in inventory["PROJECTS"]:
+        p_name = p.get("name") or "Featured Project"
+        p_desc = p.get("description") or ""
+        p_techs = p.get("technologies") or []
+        p_text = f"{p_name} {p_desc} {' '.join(p_techs)}".lower()
+
+        # Architecture claim
+        claims.append({
+            "claim": f"Architected system workflows, components, and service boundaries for {p_name}",
+            "technology": "Architecture",
+            "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_ARCHITECTURE",
+            "subtopic": f"{p_name} Architecture",
+            "project": p_name,
+            "section": "PROJECTS",
+            "context_type": "PROJECT_CONTEXT",
+            "claim_type": "architecture",
+            "strength": "system_design"
+        })
 
         if any(k in p_text for k in ["spring", "backend", "microservice", "rest", "api"]):
             claims.append({
                 "claim": f"Engineered scalable REST APIs and backend microservices using Spring Boot in {p_name}",
                 "technology": "Spring Boot",
-                "concept": "REST_ARCHITECTURE",
-                "subtopic": "REST Controllers & Services",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_SPRING_BOOT",
+                "subtopic": f"{p_name} REST APIs & Spring Boot",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "implementation",
                 "strength": "scalability"
             })
@@ -297,9 +377,11 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Architected RAG retrieval pipeline with ChromaDB vector store in {p_name}",
                 "technology": "ChromaDB",
-                "concept": "RAG_RETRIEVAL",
-                "subtopic": "Vector Retrieval & Embeddings",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_RAG_RETRIEVAL",
+                "subtopic": f"{p_name} Vector Retrieval & Embeddings",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "architecture",
                 "strength": "ai_integration"
             })
@@ -307,9 +389,11 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Developed interactive UI components and state management in {p_name} using React",
                 "technology": "React",
-                "concept": "STATE_MANAGEMENT",
-                "subtopic": "Component Hierarchy & State Management",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_REACT_UI",
+                "subtopic": f"{p_name} React State & Components",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "implementation",
                 "strength": "user_experience"
             })
@@ -317,9 +401,11 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Designed relational database schema, indexing, and transactional queries for {p_name}",
                 "technology": "MySQL",
-                "concept": "QUERY_OPTIMIZATION",
-                "subtopic": "Schema Design & Indexing",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_DATABASE",
+                "subtopic": f"{p_name} Schema Design & Indexing",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "optimization",
                 "strength": "performance"
             })
@@ -327,9 +413,11 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Implemented stateless JWT token authentication and endpoint security in {p_name}",
                 "technology": "JWT",
-                "concept": "JWT_AUTHENTICATION",
-                "subtopic": "Token Validation & Authentication",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_SECURITY",
+                "subtopic": f"{p_name} Token Validation & Authentication",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "security",
                 "strength": "data_protection"
             })
@@ -337,9 +425,11 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Trained custom convolutional neural network models and real-time computer vision inference in {p_name}",
                 "technology": "TensorFlow",
-                "concept": "COMPUTER_VISION_CNN",
-                "subtopic": "Model Architecture & Inference",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_VISION_CNN",
+                "subtopic": f"{p_name} Model Architecture & Inference",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "model_engineering",
                 "strength": "accuracy"
             })
@@ -347,9 +437,11 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Implemented distributed Redis caching to accelerate endpoint throughput in {p_name}",
                 "technology": "Redis",
-                "concept": "CACHING_STRATEGY",
-                "subtopic": "Caching Strategy & TTL",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_REDIS_CACHE",
+                "subtopic": f"{p_name} Caching Strategy & TTL",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "optimization",
                 "strength": "latency"
             })
@@ -357,27 +449,226 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
             claims.append({
                 "claim": f"Containerized application workloads and orchestrated deployments in {p_name}",
                 "technology": "Docker",
-                "concept": "CONTAINERIZATION",
-                "subtopic": "Containerization & Deployment",
+                "concept": f"{re.sub(r'[^a-zA-Z0-9]', '_', p_name).upper()}_CONTAINERIZATION",
+                "subtopic": f"{p_name} Containerization & Deployment",
                 "project": p_name,
+                "section": "PROJECTS",
+                "context_type": "PROJECT_CONTEXT",
                 "claim_type": "infrastructure",
                 "strength": "reliability"
             })
 
-    for s in skills:
-        s_str = str(s).strip()
-        if s_str and not any(c["technology"].lower() == s_str.lower() for c in claims):
+    # 2. Extract TECHNICAL_SKILLS claims (FIRST-CLASS & INDEPENDENT OF PROJECTS)
+    known_skill_concepts = {
+        "java": ("Java", "JAVA_COLLECTIONS_CONCURRENCY", "Collections Framework & Memory Model", "Demonstrated proficiency in Java OOP, Collections, and JVM memory execution"),
+        "spring boot": ("Spring Boot", "SPRING_BOOT_DI_IOC", "Dependency Injection & IoC", "Engineered backend microservices with Spring Boot dependency injection and IoC container"),
+        "spring": ("Spring Boot", "SPRING_BOOT_DI_IOC", "Dependency Injection & IoC", "Backend application development using Spring framework"),
+        "react": ("React", "REACT_VIRTUAL_DOM_HOOKS", "Virtual DOM & Component Lifecycle", "Built frontend applications leveraging React component hierarchy, hooks, and Virtual DOM"),
+        "mysql": ("MySQL", "MYSQL_INDEXING_ACID", "Indexing Strategies & Transactions", "Relational database schema modeling, indexing strategies, and ACID transaction isolation"),
+        "sql": ("SQL", "SQL_QUERY_OPTIMIZATION", "Query Optimization & Joins", "Structured query writing, join optimization, and data normalization"),
+        "python": ("Python", "PYTHON_EXECUTION_DATA_STRUCTURES", "Data Structures & Runtime", "Python application programming, data structures, and standard library patterns"),
+        "rest apis": ("REST APIs", "REST_CONTRACT_IDEMPOTENCY", "REST Design & Idempotency", "Designed RESTful HTTP endpoints, status codes, and idempotency guarantees"),
+        "rest api": ("REST APIs", "REST_CONTRACT_IDEMPOTENCY", "REST Design & Idempotency", "Designed RESTful HTTP endpoints, status codes, and idempotency guarantees"),
+        "rest": ("REST APIs", "REST_CONTRACT_IDEMPOTENCY", "REST Design & Idempotency", "Designed RESTful HTTP endpoints, status codes, and idempotency guarantees"),
+        "jwt": ("JWT", "JWT_SECURITY_MECHANISMS", "Token Signing & Validation", "Stateless authentication tokens, signature verification, and claims processing"),
+        "docker": ("Docker", "DOCKER_CONTAINER_LIFECYCLE", "Container Lifecycle & Layers", "Application containerization, Dockerfile optimization, and multi-stage builds"),
+        "redis": ("Redis", "REDIS_CACHING_STRUCTURES", "In-Memory Caching & Eviction", "In-memory key-value caching, eviction policies, and latency optimization"),
+        "git": ("Git", "GIT_VERSION_CONTROL", "Branching & Conflict Resolution", "Distributed version control, merge conflict resolution, and branching workflows")
+    }
+
+    for s in inventory["TECHNICAL_SKILLS"]:
+        s_clean = s.strip()
+        s_lower = s_clean.lower()
+        if s_lower in known_skill_concepts:
+            t_name, concept, subtopic, claim_desc = known_skill_concepts[s_lower]
+        else:
+            t_name = s_clean
+            concept = f"{re.sub(r'[^a-zA-Z0-9]', '_', s_clean).upper()}_CORE"
+            subtopic = f"{s_clean} Fundamentals"
+            claim_desc = f"Demonstrated engineering proficiency in {s_clean} application development"
+
+        if not any(c.get("section") == "TECHNICAL_SKILLS" and c.get("technology", "").lower() == t_name.lower() for c in claims):
             claims.append({
-                "claim": f"Demonstrated engineering proficiency in {s_str} application development",
-                "technology": s_str,
-                "concept": f"{s_str.upper()}_FUNDAMENTALS",
-                "subtopic": f"{s_str} Architecture",
+                "claim": claim_desc,
+                "technology": t_name,
+                "concept": concept,
+                "subtopic": subtopic,
                 "project": None,
+                "section": "TECHNICAL_SKILLS",
+                "context_type": "SKILL_CONTEXT",
                 "claim_type": "fundamentals",
                 "strength": "core_competency"
             })
 
+    # 3. Extract EXPERIENCE claims (internships and industry experience)
+    for idx, exp in enumerate(inventory["EXPERIENCE"]):
+        role = exp.get("role") or "Software Engineering Contributor"
+        company = exp.get("company") or "Technology Organization"
+        desc = exp.get("description") or "Hands-on engineering contributions."
+        claims.append({
+            "claim": f"Professional experience as {role} at {company}: {desc}",
+            "technology": "Software Engineering",
+            "concept": f"EXPERIENCE_{re.sub(r'[^a-zA-Z0-9]', '_', company).upper()}",
+            "subtopic": f"{role} Tasks & Deliverables",
+            "project": company,
+            "section": "EXPERIENCE",
+            "context_type": "EXPERIENCE_CONTEXT",
+            "claim_type": "work_experience",
+            "strength": "practical_contribution"
+        })
+
+    # 4. Extract EDUCATION claims
+    for idx, edu in enumerate(inventory["EDUCATION"]):
+        deg = edu.get("degree") or "Degree"
+        inst = edu.get("institution") or "University"
+        field = edu.get("field") or "Computer Science"
+        claims.append({
+            "claim": f"Academic coursework and degree in {deg} ({field}) at {inst}",
+            "technology": "Computer Science",
+            "concept": "EDUCATION_COURSEWORK",
+            "subtopic": f"{field} Academic Fundamentals",
+            "project": "Academic",
+            "section": "EDUCATION",
+            "context_type": "EDUCATION_CONTEXT",
+            "claim_type": "academic",
+            "strength": "computer_science_fundamentals"
+        })
+
+    # 5. Extract CERTIFICATIONS claims
+    for idx, cert in enumerate(inventory["CERTIFICATIONS"]):
+        claims.append({
+            "claim": f"Certified proficiency in {cert}",
+            "technology": cert,
+            "concept": f"CERT_{re.sub(r'[^a-zA-Z0-9]', '_', cert).upper()}",
+            "subtopic": f"{cert} Knowledge Verification",
+            "project": None,
+            "section": "CERTIFICATIONS",
+            "context_type": "CERTIFICATION_CONTEXT",
+            "claim_type": "certification",
+            "strength": "verified_credential"
+        })
+
     return claims
+
+def init_or_update_coverage_state(
+    resume_context: Dict[str, Any],
+    existing_section_cov: Optional[Dict[str, Any]] = None,
+    existing_project_cov: Optional[Dict[str, Any]] = None
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """
+    Initializes or preserves coverage state across all resume sections and projects.
+    Marks sections without resume content as UNAVAILABLE so they are never asked about.
+    """
+    inventory = build_resume_section_inventory(resume_context)
+    sec_cov: Dict[str, Dict[str, Any]] = dict(existing_section_cov or {})
+    proj_cov: Dict[str, Dict[str, Any]] = dict(existing_project_cov or {})
+
+    all_sections = ["PROJECTS", "TECHNICAL_SKILLS", "EXPERIENCE", "EDUCATION", "CERTIFICATIONS"]
+
+    for sec in all_sections:
+        has_content = bool(inventory.get(sec))
+        if sec not in sec_cov:
+            sec_cov[sec] = {
+                "section": sec,
+                "status": "NOT_EXPLORED" if has_content else "UNAVAILABLE",
+                "questions_asked": 0,
+                "topics_explored": [],
+                "strong_answers": 0,
+                "partial_answers": 0,
+                "unknown_answers": 0,
+                "last_explored_round": 0,
+                "eligible": has_content
+            }
+        else:
+            if not has_content:
+                sec_cov[sec]["status"] = "UNAVAILABLE"
+                sec_cov[sec]["eligible"] = False
+
+    for p in inventory["PROJECTS"]:
+        p_name = p.get("name") or "Featured Project"
+        if p_name not in proj_cov:
+            proj_cov[p_name] = {
+                "project": p_name,
+                "status": "NOT_EXPLORED",
+                "topics_explored": [],
+                "strong_answers": 0,
+                "partial_answers": 0,
+                "unknown_answers": 0,
+                "last_answer_classification": "NONE",
+                "immediate_revisit_allowed": True
+            }
+
+    return sec_cov, proj_cov
+
+def rank_next_resume_section(
+    section_coverage: Dict[str, Dict[str, Any]],
+    current_section: Optional[str] = None,
+    perspective: str = "SYSTEM_ARCHITECTURE",
+    remaining_seconds: int = 2700
+) -> str:
+    """
+    Dynamic Section-Priority Ranking Model (Section 12):
+    Priority =
+        Role Relevance
+      + Unexplored Evidence Value
+      + Resume Claim Value
+      + Coverage Diversity
+      + Expected Information Gain
+      - Repeated Unknown Penalty
+      - Excessive Coverage Penalty
+      - Time Cost
+    """
+    base_scores = {
+        "TECHNICAL_SKILLS": 90.0,
+        "EXPERIENCE": 88.0,
+        "PROJECTS": 85.0,
+        "EDUCATION": 70.0,
+        "CERTIFICATIONS": 65.0
+    }
+
+    scores: Dict[str, float] = {}
+    for sec, meta in section_coverage.items():
+        status = meta.get("status", "NOT_EXPLORED")
+        if status in ["UNAVAILABLE", "EXHAUSTED"] or not meta.get("eligible", True):
+            scores[sec] = -9999.0
+            continue
+
+        score = base_scores.get(sec, 60.0)
+
+        # Unexplored boost for coverage diversity
+        if status == "NOT_EXPLORED":
+            score += 35.0
+        elif status == "PRODUCTIVE":
+            score += 20.0
+        elif status == "LOW_EVIDENCE":
+            score -= 60.0
+
+        # Excessive coverage penalty
+        q_asked = meta.get("questions_asked", 0)
+        score -= (q_asked * 15.0)
+
+        # Repeated unknowns penalty
+        u_count = meta.get("unknown_answers", 0)
+        score -= (u_count * 20.0)
+
+        # Transition penalty if current section just failed
+        if sec == current_section and status in ["LOW_EVIDENCE", "IN_PROGRESS"]:
+            score -= 25.0
+
+        # Perspective alignment
+        if perspective in ["AI_ML_DEPTH", "SYSTEM_ARCHITECTURE", "PROJECT_OWNERSHIP"] and sec == "PROJECTS":
+            if status != "LOW_EVIDENCE":
+                score += 10.0
+        if perspective in ["TECHNICAL_DEPTH", "PROBLEM_SOLVING"] and sec == "TECHNICAL_SKILLS":
+            score += 15.0
+        if perspective in ["PRODUCTION_ENGINEERING"] and sec == "EXPERIENCE":
+            score += 12.0
+
+        scores[sec] = score
+
+    sorted_sections = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    best_sec = sorted_sections[0][0] if sorted_sections and sorted_sections[0][1] > -9000.0 else "TECHNICAL_SKILLS"
+    return best_sec
 
 # Backward compatibility aliases
 extract_candidate_claims = extract_claims_from_context
@@ -560,13 +851,21 @@ def select_interview_perspective_node(state: ConversationalInterviewState) -> Di
     claims_explored = list(state.get("claims_explored") or [])
     claims_remaining = [c["claim"] for c in claims if c["claim"] not in claims_explored]
 
+    sec_cov, proj_cov = init_or_update_coverage_state(
+        resume_context,
+        existing_section_cov=state.get("section_coverage"),
+        existing_project_cov=state.get("project_coverage")
+    )
+
     return {
         "perspective": chosen_p,
         "perspective_goal": goal,
         "priority_topics": p_topics,
         "priority_projects": p_projects,
         "claims": claims,
-        "claims_remaining": claims_remaining
+        "claims_remaining": claims_remaining,
+        "section_coverage": sec_cov,
+        "project_coverage": proj_cov
     }
 
 # ========================================================
@@ -844,29 +1143,135 @@ def enforce_interview_decision(
         "reason_code": "NORMAL_EXPLORATION"
     }
 
-def select_next_alternative_topic(
+def select_next_resume_target(
     state: ConversationalInterviewState,
+    analysis: AnswerAnalysis,
+    current_section: Optional[str] = None,
+    current_project: Optional[str] = None,
     current_topic: Optional[str] = None,
     current_subtopic: Optional[str] = None,
     current_skill: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Topic Selection Engine (Parts 9, 10, 11):
-    When SWITCH_TOPIC is active, selects a genuine, materially different topic supported by resume.
-    Excludes:
-    - Current failed topic/subtopic/skill
-    - Skipped subtopics and unknown topics
-    - Exhausted topics
-    - Semantic overlap with the failed area
+    Intelligent Three-Level Topic, Project, and Resume-Section Switching Engine:
+    Level 1: Subtopic Level (single unknown -> skip subtopic, try another subtopic or project)
+    Level 2: Project Level (repeated unknowns in same project -> reduce project priority, switch project or section)
+    Level 3: Resume Section Level (repeated low evidence in projects -> switch section to TECHNICAL_SKILLS, EXPERIENCE, EDUCATION, etc.)
     """
     resume_context = state.get("resume_context") or {}
+    inventory = build_resume_section_inventory(resume_context)
     claims = state.get("claims") or extract_claims_from_context(resume_context)
+
+    sec_cov, proj_cov = init_or_update_coverage_state(
+        resume_context,
+        existing_section_cov=state.get("section_coverage"),
+        existing_project_cov=state.get("project_coverage")
+    )
+
     skipped = [s.lower() for s in (state.get("skipped_subtopics") or [])]
     unknown = [u.lower() for u in (state.get("unknown_topics") or [])]
     exhausted = [e.lower() for e in (state.get("exhausted_topics") or [])]
     discussed = [d.lower() for d in (state.get("topics_discussed") or [])]
 
-    # Words to avoid from the failed topic
+    cls = analysis.get("classification", "")
+    is_unknown = analysis.get("is_explicit_unknown") or cls in ["EXPLICIT_UNKNOWN", "I_DONT_KNOW", "NO_ANSWER"]
+
+    curr_sec = current_section or "PROJECTS"
+    curr_proj = current_project or (state.get("priority_projects") or ["Project"])[0]
+
+    # Update failure counters on unknown answer
+    if is_unknown:
+        if curr_sec in sec_cov:
+            sec_cov[curr_sec]["unknown_answers"] += 1
+        if curr_proj in proj_cov:
+            proj_cov[curr_proj]["unknown_answers"] += 1
+            proj_cov[curr_proj]["last_answer_classification"] = cls
+
+    # Check Level 2: Project exit thresholds
+    if curr_sec == "PROJECTS" and curr_proj in proj_cov:
+        proj_meta = proj_cov[curr_proj]
+        # 2 distinct failed questions in same project -> reduce project priority
+        if proj_meta["unknown_answers"] >= 2:
+            proj_meta["status"] = "LOW_EVIDENCE"
+            proj_meta["immediate_revisit_allowed"] = False
+        if proj_meta["unknown_answers"] >= 3 and proj_meta.get("strong_answers", 0) == 0:
+            proj_meta["status"] = "EXHAUSTED"
+            proj_meta["immediate_revisit_allowed"] = False
+
+    # Check Level 3: Section exit thresholds
+    if curr_sec == "PROJECTS":
+        proj_sec_meta = sec_cov.get("PROJECTS", {})
+        total_proj_unknowns = proj_sec_meta.get("unknown_answers", 0)
+        low_evidence_projects = [p for p, m in proj_cov.items() if m.get("status") in ["LOW_EVIDENCE", "EXHAUSTED"]]
+
+        # If total project unknowns >= 3 OR at least 2 distinct projects have low evidence OR all projects in resume have low evidence:
+        if total_proj_unknowns >= 3 or len(low_evidence_projects) >= 2 or len(low_evidence_projects) >= max(1, len(inventory["PROJECTS"])):
+            proj_sec_meta["status"] = "LOW_EVIDENCE"
+            proj_sec_meta["eligible"] = False
+
+    if curr_sec == "TECHNICAL_SKILLS":
+        skill_sec_meta = sec_cov.get("TECHNICAL_SKILLS", {})
+        if skill_sec_meta.get("unknown_answers", 0) >= 3 and skill_sec_meta.get("strong_answers", 0) == 0:
+            skill_sec_meta["status"] = "LOW_EVIDENCE"
+            skill_sec_meta["eligible"] = False
+
+    # Determine whether to switch Section, Project, or Subtopic
+    target_section = curr_sec
+    target_project = curr_proj
+    selection_level = "SUBTOPIC"
+    reason_code = "SKIP_UNKNOWN_SUBTOPIC"
+    transition_speech = "No worries, that's completely fine. Let's move on."
+
+    # Level 3: Section Switch required?
+    if curr_sec == "PROJECTS" and sec_cov.get("PROJECTS", {}).get("status") == "LOW_EVIDENCE":
+        selection_level = "RESUME_SECTION"
+        target_section = rank_next_resume_section(sec_cov, current_section="PROJECTS", perspective=state.get("perspective") or "SYSTEM_ARCHITECTURE")
+        reason_code = "REPEATED_PROJECT_LOW_EVIDENCE"
+        if target_section == "TECHNICAL_SKILLS":
+            transition_speech = "No worries at all. Let's look at the skills you've listed on your resume."
+        elif target_section == "EXPERIENCE":
+            transition_speech = "Understood. Let's shift over to your practical internship and work experience."
+        elif target_section == "EDUCATION":
+            transition_speech = "Fair enough. Let's touch upon your academic coursework and foundational subjects."
+        else:
+            transition_speech = "No problem, let's explore another area of your background."
+
+    elif curr_sec == "TECHNICAL_SKILLS" and sec_cov.get("TECHNICAL_SKILLS", {}).get("status") == "LOW_EVIDENCE":
+        selection_level = "RESUME_SECTION"
+        target_section = rank_next_resume_section(sec_cov, current_section="TECHNICAL_SKILLS", perspective=state.get("perspective") or "SYSTEM_ARCHITECTURE")
+        reason_code = "REPEATED_SKILL_LOW_EVIDENCE"
+        if target_section == "EXPERIENCE":
+            transition_speech = "No problem. Let's look at the experience and internships you've listed on your resume."
+        elif target_section == "EDUCATION":
+            transition_speech = "Fair enough. Let's explore your computer science education and academic coursework."
+        else:
+            transition_speech = "That's completely fine. Let's look at another part of your background."
+
+    # Level 2: Project Switch within PROJECTS?
+    elif curr_sec == "PROJECTS" and proj_cov.get(curr_proj, {}).get("status") in ["LOW_EVIDENCE", "EXHAUSTED"]:
+        viable_projects = [
+            p.get("name") for p in inventory["PROJECTS"]
+            if proj_cov.get(p.get("name"), {}).get("status") not in ["LOW_EVIDENCE", "EXHAUSTED"]
+        ]
+        if viable_projects:
+            selection_level = "PROJECT_OR_ITEM"
+            target_project = viable_projects[0]
+            target_section = "PROJECTS"
+            reason_code = "SWITCH_PROJECT_AFTER_DIFFICULTY"
+            transition_speech = f"Understood. Let's move over to another project on your resume, {target_project}."
+        else:
+            # All projects low evidence -> Level 3 Section Switch!
+            selection_level = "RESUME_SECTION"
+            sec_cov["PROJECTS"]["status"] = "LOW_EVIDENCE"
+            sec_cov["PROJECTS"]["eligible"] = False
+            target_section = rank_next_resume_section(sec_cov, current_section="PROJECTS", perspective=state.get("perspective") or "SYSTEM_ARCHITECTURE")
+            reason_code = "ALL_PROJECTS_EXHAUSTED_SWITCH_SECTION"
+            if target_section == "TECHNICAL_SKILLS":
+                transition_speech = "No worries. Let's transition to the technical skills listed on your resume."
+            else:
+                transition_speech = "No problem, let's look at another part of your background."
+
+    # Avoid failed keywords
     avoid_words = set()
     if current_topic:
         avoid_words.update(current_topic.lower().replace("_", " ").split())
@@ -878,81 +1283,114 @@ def select_next_alternative_topic(
         avoid_words.update(s.split())
     avoid_words = {w for w in avoid_words if len(w) > 3 and w not in ["with", "that", "this", "from", "into", "using"]}
 
-    # Filter claims to those that are genuinely different
-    valid_claims = []
-    for c in claims:
+    def claim_matches(c: StructuredClaim) -> bool:
+        if c.get("section") != target_section:
+            return False
+        if target_section == "PROJECTS" and target_project and c.get("project") != target_project:
+            return False
         tech = c.get("technology", "").lower()
         concept = c.get("concept", "").lower()
-        subtopic = (c.get("subtopic") or "").lower()
+        subtop = (c.get("subtopic") or "").lower()
 
-        # Must not match current skill or topic
         if current_skill and tech == current_skill.lower():
-            continue
+            return False
         if current_topic and concept == current_topic.lower():
-            continue
+            return False
+        if current_subtopic and subtop == current_subtopic.lower():
+            return False
 
-        # Must not match skipped or unknown or exhausted
-        if tech in skipped or tech in unknown or tech in exhausted:
-            continue
-        if concept in skipped or concept in unknown or concept in exhausted:
-            continue
-        if subtopic in skipped or subtopic in unknown:
-            continue
+        if subtop in skipped or subtop in unknown:
+            return False
+        if tech in unknown:
+            return False
+        if concept in unknown or concept in exhausted:
+            return False
 
-        # Semantic collision check: avoid subtopics sharing distinctive keywords
-        overlap = any(w in tech or w in concept or w in subtopic for w in avoid_words)
-        if overlap:
-            continue
+        if any(w in subtop for w in avoid_words):
+            return False
 
-        valid_claims.append(c)
+        return True
 
-    # 1. Prefer unvisited valid claims
-    unvisited = [c for c in valid_claims if c.get("concept", "").lower() not in discussed and c.get("technology", "").lower() not in discussed]
-    chosen = unvisited[0] if unvisited else (valid_claims[0] if valid_claims else None)
+    eligible_claims = [c for c in claims if claim_matches(c)]
+    unvisited = [
+        c for c in eligible_claims
+        if c.get("concept", "").lower() not in discussed and c.get("technology", "").lower() not in discussed
+    ]
+    chosen = unvisited[0] if unvisited else (eligible_claims[0] if eligible_claims else None)
+
+    if not chosen and target_section != "TECHNICAL_SKILLS" and sec_cov.get("TECHNICAL_SKILLS", {}).get("eligible", True):
+        # Fallback to TECHNICAL_SKILLS
+        target_section = "TECHNICAL_SKILLS"
+        selection_level = "RESUME_SECTION"
+        eligible_claims = [
+            c for c in claims
+            if c.get("section") == "TECHNICAL_SKILLS"
+            and (c.get("subtopic") or "").lower() not in skipped
+            and c.get("technology", "").lower() not in unknown
+        ]
+        chosen = eligible_claims[0] if eligible_claims else None
+        transition_speech = "No worries, let's explore the skills listed on your resume."
 
     if chosen:
         topic = chosen["concept"]
         subtopic = chosen.get("subtopic") or f"{chosen['technology']} Fundamentals"
         skill = chosen["technology"]
-        project = chosen.get("project") or (state.get("priority_projects") or ["Project"])[0]
+        project = chosen.get("project") or target_project
+        context_type = chosen.get("context_type") or ("SKILL_CONTEXT" if target_section == "TECHNICAL_SKILLS" else "PROJECT_CONTEXT")
         claim_text = chosen.get("claim")
     else:
-        # Fallback to alternate core standard domain
-        default_alternatives = [
-            ("Spring Boot", "REST_ARCHITECTURE", "Backend Service Architecture"),
-            ("MySQL", "DATABASE_DESIGN", "Schema Design & Transactions"),
-            ("React", "FRONTEND_STATE", "Component State Management"),
-            ("JWT", "SECURITY_AUTH", "Token Authentication & Protection"),
-            ("Redis", "CACHING_LAYER", "Caching & Latency Optimization")
-        ]
-        chosen_alt = None
-        for tech_alt, top_alt, sub_alt in default_alternatives:
-            if tech_alt.lower() != (current_skill or "").lower() and tech_alt.lower() not in skipped and tech_alt.lower() not in unknown:
-                chosen_alt = (tech_alt, top_alt, sub_alt)
-                break
-        if chosen_alt:
-            skill, topic, subtopic = chosen_alt
-            project = (state.get("priority_projects") or ["Project"])[0]
-            claim_text = None
-        else:
-            # All topics truly exhausted
-            return {
-                "action": "END_INTERVIEW",
-                "topic": "CLOSING",
-                "subtopic": "Summary & Reflection",
-                "skill": "Closing",
-                "project": "Project",
-                "claim": None
-            }
+        # All sections exhausted
+        return {
+            "action": "END_INTERVIEW",
+            "selection_level": "END_INTERVIEW",
+            "section": target_section,
+            "context_type": "CLOSING",
+            "topic": "CLOSING",
+            "subtopic": "Summary & Reflection",
+            "skill": "Closing",
+            "project": target_project,
+            "claim": None,
+            "transition_speech": "Thank you for walking through your resume and background today.",
+            "reason_code": "ALL_RESUME_SECTIONS_EXPLORED",
+            "section_coverage": sec_cov,
+            "project_coverage": proj_cov
+        }
 
     return {
         "action": "SWITCH_TOPIC",
+        "selection_level": selection_level,
+        "section": target_section,
+        "context_type": context_type,
+        "project": project,
         "topic": topic,
         "subtopic": subtopic,
         "skill": skill,
-        "project": project,
-        "claim": claim_text
+        "claim": claim_text,
+        "transition_speech": transition_speech,
+        "reason_code": reason_code,
+        "section_coverage": sec_cov,
+        "project_coverage": proj_cov
     }
+
+def select_next_alternative_topic(
+    state: ConversationalInterviewState,
+    current_topic: Optional[str] = None,
+    current_subtopic: Optional[str] = None,
+    current_skill: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Topic Selection Engine (Parts 9, 10, 11) using the 3-level resume target selector.
+    """
+    analysis = state.get("answer_analysis") or {"classification": "EXPLICIT_UNKNOWN", "is_explicit_unknown": True}
+    return select_next_resume_target(
+        state=state,
+        analysis=analysis,
+        current_section=state.get("current_section"),
+        current_project=state.get("current_project"),
+        current_topic=current_topic,
+        current_subtopic=current_subtopic,
+        current_skill=current_skill
+    )
 
 # ========================================================
 # 7. NODE 3: DECIDE NEXT INTERVIEW ACTION (LIVE BRAIN)
@@ -974,6 +1412,15 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
 
     projects = state.get("priority_projects") or [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Project") for p in (resume_context.get("projects") or [])]
     project = projects[0] if projects else "Project"
+
+    sec_cov, proj_cov = init_or_update_coverage_state(
+        resume_context,
+        existing_section_cov=state.get("section_coverage"),
+        existing_project_cov=state.get("project_coverage")
+    )
+    current_section = state.get("current_section") or "PROJECTS"
+    current_project = state.get("current_project") or project
+    current_context_type = state.get("current_context_type") or "PROJECT_CONTEXT"
 
     current_topic = state.get("current_topic")
     current_subtopic = state.get("current_subtopic")
@@ -1007,6 +1454,12 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             current_subtopic = "System Design"
 
     current_skill = current_topic or "Architecture"
+    if current_skill.startswith("Technical Skills: "):
+        current_skill = current_skill.replace("Technical Skills: ", "").strip()
+    elif current_skill.startswith("Projects: "):
+        current_skill = current_skill.replace("Projects: ", "").strip()
+    if current_project and current_skill.startswith(current_project) and len(current_skill) > len(current_project):
+        current_skill = current_skill[len(current_project):].strip()
     current_depth = state.get("current_depth", 0)
     topics_discussed = list(state.get("topics_discussed") or [])
     skipped_subtopics = list(state.get("skipped_subtopics") or [])
@@ -1034,7 +1487,10 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "retrieval_query": "",
             "allow_same_topic_follow_up": False,
             "clarification_attempted": False,
-            "reason_code": "TIME_EXPIRED"
+            "reason_code": "TIME_EXPIRED",
+            "section": current_section,
+            "context_type": "CLOSING",
+            "selection_level": "END_INTERVIEW"
         }
         return {
             "plan": plan,
@@ -1047,7 +1503,12 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "exhausted_topics": exhausted_topics,
             "allow_same_topic_follow_up": False,
             "clarification_attempted": False,
-            "reason_code": "TIME_EXPIRED"
+            "reason_code": "TIME_EXPIRED",
+            "current_section": current_section,
+            "current_project": current_project,
+            "current_context_type": "CLOSING",
+            "section_coverage": sec_cov,
+            "project_coverage": proj_cov
         }
 
     # 2. Turn 1: Natural Opener
@@ -1071,8 +1532,13 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "retrieval_query": "",
             "allow_same_topic_follow_up": True,
             "clarification_attempted": False,
-            "reason_code": "INTERVIEW_OPENER"
+            "reason_code": "INTERVIEW_OPENER",
+            "section": "PROJECTS",
+            "context_type": "PROJECT_CONTEXT",
+            "selection_level": "SUBTOPIC"
         }
+        if "PROJECTS" in sec_cov:
+            sec_cov["PROJECTS"]["questions_asked"] += 1
         return {
             "plan": plan,
             "current_depth": 0,
@@ -1084,7 +1550,12 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "exhausted_topics": exhausted_topics,
             "allow_same_topic_follow_up": True,
             "clarification_attempted": False,
-            "reason_code": "INTERVIEW_OPENER"
+            "reason_code": "INTERVIEW_OPENER",
+            "current_section": "PROJECTS",
+            "current_project": project,
+            "current_context_type": "PROJECT_CONTEXT",
+            "section_coverage": sec_cov,
+            "project_coverage": proj_cov
         }
 
     # 3. Deterministic Decision Enforcement (Parts 6 & 7)
@@ -1118,10 +1589,21 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
         else:
             transition_msg = random.choice(TRANSITION_PHRASES)
 
-        # Select distinct alternative topic
-        alt = select_next_alternative_topic(state, current_topic, current_subtopic, current_skill)
-        if alt["action"] == "END_INTERVIEW":
-            # Graceful ending if all topics exhausted
+        # Select distinct alternative target across Subtopic, Project, or Resume Section
+        target = select_next_resume_target(
+            state=state,
+            analysis=analysis,
+            current_section=current_section,
+            current_project=current_project,
+            current_topic=current_topic,
+            current_subtopic=current_subtopic,
+            current_skill=current_skill
+        )
+
+        sec_cov = target.get("section_coverage", sec_cov)
+        proj_cov = target.get("project_coverage", proj_cov)
+
+        if target["action"] == "END_INTERVIEW":
             plan: InterviewPlan = {
                 "action": "END_INTERVIEW",
                 "topic": "CLOSING",
@@ -1135,12 +1617,15 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
                 "reason": "All resume topic areas have been thoroughly explored.",
                 "expected_concepts": ["Reflection", "Career aspirations"],
                 "is_follow_up": False,
-                "transition_speech": "Thank you so much. We have covered your main technical areas thoroughly today.",
+                "transition_speech": target.get("transition_speech") or "Thank you so much. We have covered your main technical areas thoroughly today.",
                 "semantic_fingerprint": "interview_closing_wrapup",
                 "retrieval_query": "",
                 "allow_same_topic_follow_up": False,
                 "clarification_attempted": False,
-                "reason_code": "ALL_TOPICS_EXHAUSTED"
+                "reason_code": target.get("reason_code", "ALL_TOPICS_EXHAUSTED"),
+                "section": target.get("section"),
+                "context_type": "CLOSING",
+                "selection_level": "END_INTERVIEW"
             }
             return {
                 "plan": plan,
@@ -1153,13 +1638,27 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
                 "exhausted_topics": exhausted_topics,
                 "allow_same_topic_follow_up": False,
                 "clarification_attempted": False,
-                "reason_code": "ALL_TOPICS_EXHAUSTED"
+                "reason_code": target.get("reason_code", "ALL_TOPICS_EXHAUSTED"),
+                "current_section": target.get("section"),
+                "current_project": target.get("project"),
+                "current_context_type": "CLOSING",
+                "section_coverage": sec_cov,
+                "project_coverage": proj_cov
             }
 
-        new_topic = alt["topic"]
-        new_subtopic = alt["subtopic"]
-        new_skill = alt["skill"]
-        new_project = alt["project"]
+        new_topic = target["topic"]
+        new_subtopic = target["subtopic"]
+        new_skill = target["skill"]
+        new_project = target["project"]
+        new_section = target["section"]
+        new_context = target["context_type"]
+        new_level = target.get("selection_level", "SUBTOPIC")
+        new_trans = target.get("transition_speech", transition_msg)
+
+        if new_section in sec_cov:
+            sec_cov[new_section]["questions_asked"] += 1
+            if new_subtopic not in sec_cov[new_section]["topics_explored"]:
+                sec_cov[new_section]["topics_explored"].append(new_subtopic)
 
         avail_angles = p_meta.get("angles", ["ARCHITECTURE", "SCALABILITY", "TRADEOFF", "SECURITY"])
         angle = avail_angles[round_number % len(avail_angles)]
@@ -1170,19 +1669,22 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "subtopic": new_subtopic,
             "skill": new_skill,
             "project": new_project,
-            "claim": alt.get("claim"),
+            "claim": target.get("claim"),
             "angle": angle,
             "style": p_meta.get("style", "PROJECT_SPECIFIC"),
             "difficulty": difficulty,
-            "reason": f"Transitioning to unexplored topic area {new_skill} (Reason: {reason_code}).",
+            "reason": f"Transitioning to unexplored {new_level.lower()} in {new_section} (Reason: {target.get('reason_code', reason_code)}).",
             "expected_concepts": [new_skill, "Architecture"],
             "is_follow_up": False,
-            "transition_speech": transition_msg,
+            "transition_speech": new_trans,
             "semantic_fingerprint": f"{new_topic.lower()}|{new_skill.lower()}|{angle.lower()}",
             "retrieval_query": "",
             "allow_same_topic_follow_up": False,
             "clarification_attempted": False,
-            "reason_code": reason_code
+            "reason_code": target.get("reason_code", reason_code),
+            "section": new_section,
+            "context_type": new_context,
+            "selection_level": new_level
         }
         if new_skill not in topics_discussed:
             topics_discussed.append(new_skill)
@@ -1200,17 +1702,26 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "clarification_attempted": False,
             "follow_up_count": 0,
             "allow_same_topic_follow_up": False,
-            "reason_code": reason_code
+            "reason_code": target.get("reason_code", reason_code),
+            "current_section": new_section,
+            "current_project": new_project,
+            "current_context_type": new_context,
+            "section_coverage": sec_cov,
+            "project_coverage": proj_cov
         }
 
     # 5. Handle CLARIFY (Follow-up Budget = 1)
     if action == "CLARIFY":
+        if current_section in sec_cov:
+            sec_cov[current_section]["partial_answers"] += 1
+            sec_cov[current_section]["questions_asked"] += 1
+
         plan: InterviewPlan = {
             "action": "CLARIFY",
             "topic": current_topic or current_skill,
             "subtopic": current_subtopic or f"{current_skill} Implementation Mechanics",
             "skill": current_skill,
-            "project": project,
+            "project": current_project or project,
             "claim": None,
             "angle": "IMPLEMENTATION",
             "style": "FOLLOW_UP",
@@ -1223,7 +1734,10 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "retrieval_query": "",
             "allow_same_topic_follow_up": True,
             "clarification_attempted": True,
-            "reason_code": "CLARIFY_ONCE"
+            "reason_code": "CLARIFY_ONCE",
+            "section": current_section,
+            "context_type": current_context_type,
+            "selection_level": "SUBTOPIC"
         }
         return {
             "plan": plan,
@@ -1238,10 +1752,23 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "clarification_attempted": True,
             "follow_up_count": follow_up_count + 1,
             "allow_same_topic_follow_up": True,
-            "reason_code": "CLARIFY_ONCE"
+            "reason_code": "CLARIFY_ONCE",
+            "current_section": current_section,
+            "current_project": current_project,
+            "current_context_type": current_context_type,
+            "section_coverage": sec_cov,
+            "project_coverage": proj_cov
         }
 
     # 6. Handle GO_DEEPER / EXPLORE_NEW_DETAIL
+    if current_section in sec_cov:
+        sec_cov[current_section]["strong_answers"] += 1
+        sec_cov[current_section]["status"] = "PRODUCTIVE"
+        sec_cov[current_section]["questions_asked"] += 1
+    if current_project and current_project in proj_cov:
+        proj_cov[current_project]["strong_answers"] += 1
+        proj_cov[current_project]["status"] = "PRODUCTIVE"
+
     avail_angles = p_meta.get("angles", ["OPTIMIZATION", "FAILURE", "SCALABILITY", "TRADEOFF", "SECURITY"])
     angle = avail_angles[current_depth % len(avail_angles)]
 
@@ -1262,7 +1789,7 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
         "topic": current_topic or current_skill,
         "subtopic": subtopic_title,
         "skill": current_skill,
-        "project": project,
+        "project": current_project or project,
         "claim": None,
         "angle": angle_name,
         "style": p_meta.get("style", "SCENARIO"),
@@ -1275,7 +1802,10 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
         "retrieval_query": "",
         "allow_same_topic_follow_up": True,
         "clarification_attempted": False,
-        "reason_code": reason_code
+        "reason_code": reason_code,
+        "section": current_section,
+        "context_type": current_context_type,
+        "selection_level": "SUBTOPIC"
     }
     return {
         "plan": plan,
@@ -1290,7 +1820,12 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
         "clarification_attempted": False,
         "follow_up_count": follow_up_count + 1,
         "allow_same_topic_follow_up": True,
-        "reason_code": reason_code
+        "reason_code": reason_code,
+        "current_section": current_section,
+        "current_project": current_project,
+        "current_context_type": current_context_type,
+        "section_coverage": sec_cov,
+        "project_coverage": proj_cov
     }
 
 # ========================================================
@@ -1305,6 +1840,8 @@ def retrieve_resume_context_node(state: ConversationalInterviewState) -> Dict[st
     candidate_id = state.get("candidate_id", "candidate-default")
     resume_context = state.get("resume_context") or {}
     plan = state.get("plan") or {}
+    target_section = plan.get("section") or state.get("current_section") or "PROJECTS"
+    context_type = plan.get("context_type") or state.get("current_context_type") or "PROJECT_CONTEXT"
     target_skill = plan.get("skill") or "Architecture"
     target_topic = plan.get("topic") or "System Design"
     target_project = plan.get("project") or ""
@@ -1323,14 +1860,22 @@ def retrieve_resume_context_node(state: ConversationalInterviewState) -> Dict[st
         except Exception as e:
             logger.warning(f"Chroma indexing note: {e}")
 
-    # Build dynamic query for the target skill and project decided by brain
-    query_text = f"candidate {target_skill} {target_topic} {target_project} {perspective}".strip()
+    # Build dynamic query for the target skill and section decided by brain
+    if context_type == "SKILL_CONTEXT" or target_section == "TECHNICAL_SKILLS":
+        query_text = f"candidate technical skills {target_skill} {target_topic} {perspective}".strip()
+    elif context_type == "EXPERIENCE_CONTEXT" or target_section == "EXPERIENCE":
+        query_text = f"candidate professional experience internship {target_project} {target_topic}".strip()
+    elif context_type == "EDUCATION_CONTEXT" or target_section == "EDUCATION":
+        query_text = f"candidate education academic coursework computer science {target_topic}".strip()
+    else:
+        query_text = f"candidate {target_skill} {target_topic} {target_project} {perspective}".strip()
 
     retrieved = retrieve_relevant_resume_knowledge(
         candidate_id=candidate_id,
         resume_id=None,
         query_text=query_text,
-        n_results=4
+        n_results=4,
+        section=target_section
     )
 
     return {
@@ -1373,6 +1918,8 @@ def generate_natural_interview_question_node(state: ConversationalInterviewState
     difficulty = plan.get("difficulty", "MEDIUM")
     action = plan.get("action", "ASK_QUESTION")
     transition_speech = plan.get("transition_speech", "")
+    section = plan.get("section") or state.get("current_section") or "PROJECTS"
+    context_type = plan.get("context_type") or state.get("current_context_type") or ("SKILL_CONTEXT" if section == "TECHNICAL_SKILLS" else "PROJECT_CONTEXT")
 
     seen_fingerprints: Set[str] = set()
     for h in all_interactions:
@@ -1520,20 +2067,31 @@ def generate_natural_interview_question_node(state: ConversationalInterviewState
     global _gemini_available
     if _gemini_available and settings.GEMINI_API_KEY:
         try:
+            section_directive = ""
+            if section == "TECHNICAL_SKILLS" or context_type == "SKILL_CONTEXT":
+                section_directive = f"CRITICAL: Candidate's listed Technical Skill '{skill}'. DO NOT mention or frame this around any project (such as {p_name}). Ask purely about conceptual mechanics, best practices, and code design in {skill}."
+            elif section in ["EXPERIENCE", "INTERNSHIPS", "WORK_EXPERIENCE"] or context_type == "EXPERIENCE_CONTEXT":
+                section_directive = f"CRITICAL: Candidate's professional work or internship experience. Ask about hands-on responsibilities, engineering decisions, and contributions in {skill} without inventing claims."
+            elif section == "EDUCATION" or context_type == "EDUCATION_CONTEXT":
+                section_directive = f"CRITICAL: Academic coursework and computer science fundamentals related to {skill}."
+
             prompt = f"""You are a Principal Engineering Interviewer conducting an interactive spoken interview.
 Candidate: {candidate_name} | Role: {role}
 Perspective: {perspective} (Goal: {p_meta['goal']})
 Candidate Spoken Answer: "{last_ans}"
 Interviewer Decision: {action} (Angle: {angle}, Style: {style})
-Topic: {topic} | Skill: {skill} | Project: {p_name}
+Current Section: {section} ({context_type})
+Topic: {topic} | Skill: {skill} | Project: {p_name if section == 'PROJECTS' else 'N/A (Skill Context)'}
 Transition speech to lead with: "{transition_speech}"
+
+{section_directive}
 
 Retrieved Resume Knowledge from ChromaDB:
 {retrieved_text}
 
 Task:
-Produce ONE conversational spoken question strictly aligned with the perspective '{perspective}' and the candidate's last answer.
-If the candidate spoke about a specific technology (e.g., RAG, React, MySQL, JWT), tailor the question directly to that domain!
+Produce ONE conversational spoken question strictly aligned with the perspective '{perspective}', section '{section}', and the candidate's last answer.
+If the candidate spoke about a specific technology, tailor the question directly to that domain!
 Avoid exam-like phrases. Keep it natural, human, and technically rigorous.
 
 Respond STRICTLY in JSON:
@@ -1554,7 +2112,9 @@ Respond STRICTLY in JSON:
             full_speech = data.get("full_speech_text") or f"{data.get('acknowledgement', '')} {q_text}".strip()
             fp = normalize_fingerprint(q_text)
 
-            if fp not in seen_fingerprints and len(q_text) > 15:
+            is_contaminated = (section != "PROJECTS" and p_name.lower() in q_text.lower() and p_name.lower() != "your project")
+
+            if fp not in seen_fingerprints and len(q_text) > 15 and not is_contaminated:
                 return {
                     "generated_turn": {
                         "action": action,
@@ -1562,11 +2122,13 @@ Respond STRICTLY in JSON:
                         "question_text": q_text,
                         "full_speech_text": full_speech,
                         "question_category": perspective,
-                        "question_source": f"Resume AI Interviewer -> {perspective} ({angle})",
+                        "question_source": f"Resume AI Interviewer -> {section}:{perspective} ({angle})",
                         "topic": data.get("topic", topic),
                         "subtopic": data.get("subtopic", subtopic),
                         "skill": skill,
-                        "project": project,
+                        "project": project if section == "PROJECTS" else None,
+                        "section": section,
+                        "context_type": context_type,
                         "angle": angle,
                         "question_type": style,
                         "semantic_fingerprint": fp,
@@ -1582,107 +2144,217 @@ Respond STRICTLY in JSON:
 
     # Deterministic Perspective-Tailored Fallback Templates
     q_templates = []
-    if skill == "RAG" or skill == "ChromaDB":
+    
+    if section == "TECHNICAL_SKILLS" or context_type == "SKILL_CONTEXT":
+        if skill in ["Spring Boot", "Spring"]:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    "How does dependency injection in Spring Boot reduce coupling, and how would you use constructor injection to make a service easier to test?",
+                    "In Spring Boot, how does the application context manage bean lifecycles, and how do you handle circular dependencies?",
+                    "How do transaction isolation levels and propagation work with @Transactional in Spring Boot under high concurrency?"
+                ]
+            else:
+                q_templates = [
+                    "You list Spring Boot among your technical skills. Could you explain how dependency injection works in the framework, perhaps using an example?",
+                    "In Spring Boot, how do you structure controllers, services, and repositories to build clean, maintainable REST APIs?",
+                    "How do auto-configuration and Spring Boot starters work under the hood when bootstrapping a service?"
+                ]
+        elif skill in ["Java", "Core Java"]:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    "In Java, how does the memory management model and garbage collection behave under heavy object allocation?",
+                    "How do concurrent collections like ConcurrentHashMap achieve thread safety in Java without locking the entire data structure?",
+                    "Could you walk me through the internal bucketing and rehashing mechanism of a HashMap in Java when hash collisions occur?"
+                ]
+            else:
+                q_templates = [
+                    "How would you choose between an ArrayList and a HashSet for a particular use case, and what are their time complexities?",
+                    "In core Java, how does a HashMap differ from a TreeMap, and when would you choose each?",
+                    "Could you explain the difference between checked and unchecked exceptions in Java and when to use each?"
+                ]
+        elif skill in ["MySQL", "SQL", "Database"]:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    "In MySQL, how do B-tree indexes work under the hood, and how do composite indexes impact query execution plans?",
+                    "How do transaction isolation levels like READ COMMITTED versus REPEATABLE READ prevent concurrency anomalies in MySQL?"
+                ]
+            else:
+                q_templates = [
+                    "You list MySQL among your technical skills. How did you use SQL, and which types of queries are you most comfortable writing and optimizing?",
+                    "In relational database design with MySQL, when would you normalize tables versus choosing denormalization for read performance?"
+                ]
+        elif skill in ["React", "ReactJS"]:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    "In React, how does the Virtual DOM reconciliation algorithm work, and when should you optimize re-renders using useMemo, useCallback, or React.memo?",
+                    "How do React custom hooks manage state and cleanup across component lifecycles?"
+                ]
+            else:
+                q_templates = [
+                    "You list React among your technical skills. Could you walk me through how state management and component re-rendering work in modern React?",
+                    "In React, how do you manage state across sibling or nested components without prop drilling?"
+                ]
+        elif skill in ["Python"]:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    "In Python, how does the Global Interpreter Lock (GIL) impact multithreading versus multiprocessing for CPU-bound tasks?",
+                    "How do Python generators and memory-efficient iterators work under the hood compared to list comprehensions?"
+                ]
+            else:
+                q_templates = [
+                    "You list Python in your technical skills. Could you explain the difference between shallow copy and deep copy, and when mutable default arguments cause bugs?",
+                    "In Python, how do decorators work and how would you implement a custom caching decorator?"
+                ]
+        elif skill in ["REST APIs", "REST", "APIs"]:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    "In REST API design, how do you ensure idempotency for POST and PUT requests when clients retry upon network timeouts?",
+                    "How do you design versioning, pagination, and rate limiting for high-throughput public REST APIs?"
+                ]
+            else:
+                q_templates = [
+                    "You list REST APIs among your technical skills. What principles define a truly RESTful API, and how do you design consistent status codes and error responses?"
+                ]
+        else:
+            if action == "GO_DEEPER":
+                q_templates = [
+                    f"Going deeper into {skill}, what are the key trade-offs, performance characteristics, and edge cases you consider when working with it?",
+                    f"How do you handle error handling, performance tuning, and edge cases when working with {skill}?"
+                ]
+            else:
+                q_templates = [
+                    f"You list {skill} among your technical skills on your resume. Could you explain its core concepts and how you have worked with it?",
+                    f"What architectural advantages or practical benefits have you found when applying {skill}?"
+                ]
+    elif section in ["EXPERIENCE", "INTERNSHIPS", "WORK_EXPERIENCE"] or context_type == "EXPERIENCE_CONTEXT":
         if action == "GO_DEEPER":
             q_templates = [
-                f"How did you decide the chunk size and top-k value for your document vectors in ChromaDB, and how did that affect retrieval quality in {p_name}?",
-                f"What specific strategies did you use to evaluate retrieval precision and mitigate hallucination in your RAG pipeline on {p_name}?",
-                f"How did your retrieval pipeline handle noisy or out-of-domain queries when performing vector similarity search in ChromaDB?"
-            ]
-        elif action == "CLARIFY":
-            q_templates = [
-                f"Could you walk me through what information you stored in ChromaDB, and what happened between receiving a user query and retrieving context?",
-                f"How were documents chunked and embedded before indexing into ChromaDB in {p_name}?"
-            ]
-        elif action == "CHALLENGE":
-            q_templates = [
-                f"Suppose vector search in ChromaDB returns conflicting or irrelevant chunks for a complex prompt in {p_name}. How would your pipeline detect and handle that?",
-                f"How does your RAG architecture scale if the vector database grows to millions of embeddings with concurrent queries?"
+                f"In your work experience, what was a specific technical challenge or debugging problem you encountered in {skill}, and how did you resolve it?",
+                f"How did you validate data, handle errors, and ensure test coverage during your work with {skill}?"
             ]
         else:
             q_templates = [
-                f"In your work with RAG and ChromaDB on {p_name}, how did you structure the embedding and retrieval pipeline?",
-                f"What made ChromaDB the right choice for your vector search needs compared to other storage alternatives in {p_name}?"
+                f"I noticed you completed an internship and work experience. What were the main tasks and responsibilities you personally worked on with {skill}?",
+                f"In your work experience, what was the most impactful feature or technical contribution you personally delivered using {skill}?"
             ]
-    elif skill == "React":
+    elif section == "EDUCATION" or context_type == "EDUCATION_CONTEXT":
         if action == "GO_DEEPER":
             q_templates = [
-                f"In {p_name}, how did you structure state management and avoid unnecessary component re-renders when streaming or fetching data from the backend?",
-                f"How did you handle error boundaries, offline states, and optimistic UI updates in your React frontend on {p_name}?"
-            ]
-        elif action == "CLARIFY":
-            q_templates = [
-                f"How did your React frontend communicate with the backend REST APIs in {p_name}, and how did you manage authentication state?",
-                f"What lifecycle hooks or custom state patterns did you rely on most heavily in {p_name}?"
+                f"In your computer science coursework, how did your study of {skill} prepare you for practical software engineering problems?",
+                f"What core algorithmic concepts or theoretical foundations from your coursework have proven most valuable in practical software development?"
             ]
         else:
             q_templates = [
-                f"Looking at your React frontend in {p_name}, what was the most complex component hierarchy or state flow you implemented?",
-                f"How did you ensure responsive rendering and fast initial page loads in your React application for {p_name}?"
+                f"Looking at your education on your resume, what relevant coursework or technical subjects did you focus on most heavily?",
+                f"In your academic studies, how did you apply {skill} or core computer science fundamentals to your coursework projects?"
             ]
-    elif skill == "MySQL" or skill == "Database":
-        if action == "GO_DEEPER":
-            q_templates = [
-                f"In {p_name}, what indexing strategies did you implement on your MySQL tables, and how did you optimize slow queries under load?",
-                f"How did you manage database transaction isolation levels and prevent deadlocks during concurrent writes in {p_name}?"
-            ]
-        elif action == "CLARIFY":
-            q_templates = [
-                f"Could you walk me through the schema design in MySQL for {p_name} and how you structured relationships between core entities?",
-                f"How did you handle database connection pooling and query execution in {p_name}?"
-            ]
-        else:
-            q_templates = [
-                f"What were the primary data persistence trade-offs you encountered when designing the relational database for {p_name}?",
-                f"If database write traffic increased significantly in {p_name}, how would you approach partitioning, sharding, or caching?"
-            ]
-    elif skill == "JWT" or skill == "Security":
-        if action == "GO_DEEPER":
-            q_templates = [
-                f"When implementing JWT authentication in {p_name}, how did you handle token signing, expiration, refresh token rotation, and revocation?",
-                f"How did you prevent vulnerabilities like token tampering, CSRF, and unauthorized role elevation across your protected endpoints in {p_name}?"
-            ]
-        elif action == "CLARIFY":
-            q_templates = [
-                f"Walk me through the lifecycle of a request authenticating via JWT from the client to your protected backend endpoints in {p_name}.",
-                f"How did your backend validate token claims and enforce role-based access control in {p_name}?"
-            ]
-        else:
-            q_templates = [
-                f"In {p_name}, what security practices did you put in place to ensure sensitive credentials and tokens are protected both in transit and at rest?",
-                f"How did you structure authentication filters and security headers in your application on {p_name}?"
-            ]
-    elif skill == "Spring Boot":
-        if action == "GO_DEEPER":
-            q_templates = [
-                f"In your Spring Boot backend for {p_name}, how did you design dependency injection, custom exception handling, and transaction boundaries?",
-                f"If an endpoint in {p_name} experienced sudden connection pool exhaustion or high thread contention, how would you diagnose and resolve it?"
-            ]
-        elif action == "CLARIFY":
-            q_templates = [
-                f"How did you structure your controllers, services, and repository layers in Spring Boot for {p_name}?",
-                f"What validation annotations and interceptors did you rely on in your Spring Boot REST APIs for {p_name}?"
-            ]
-        else:
-            q_templates = [
-                f"What part of the Spring Boot backend architecture in {p_name} did you personally design and implement?",
-                f"How did your Spring Boot application handle asynchronous tasks and external service timeouts in {p_name}?"
-            ]
-    elif angle == "SCALABILITY":
+    elif section == "CERTIFICATIONS" or context_type == "CERTIFICATION_CONTEXT":
         q_templates = [
-            f"Suppose traffic to {p_name} increases by 100x. What is the very first bottleneck you would expect in your {skill} layer, and how would you re-architect it?",
-            f"How would you horizontally scale the {skill} components in {p_name} across multiple nodes while keeping latency low?"
-        ]
-    elif angle == "DEBUGGING" or angle == "FAILURE":
-        q_templates = [
-            f"Suppose an endpoint in {p_name} using {skill} intermittently times out during peak hours. Walk me step-by-step through how you isolate the root cause.",
-            f"How does {p_name} recover gracefully if downstream {skill} services crash or become unreachable?"
+            f"I noticed your certification in {skill}. What core architectural and practical concepts did you master through that certification?"
         ]
     else:
-        q_templates = [
-            f"Looking at your experience with {skill} on {p_name}, what was the most challenging technical feature you implemented, and what trade-offs did you face?",
-            f"How did your {skill} module in {p_name} communicate with other components, and how did you handle operational errors?"
-        ]
+        # PROJECT_CONTEXT templates
+        if skill == "RAG" or skill == "ChromaDB":
+            if action == "GO_DEEPER":
+                q_templates = [
+                    f"How did you decide the chunk size and top-k value for your document vectors in ChromaDB, and how did that affect retrieval quality in {p_name}?",
+                    f"What specific strategies did you use to evaluate retrieval precision and mitigate hallucination in your RAG pipeline on {p_name}?",
+                    f"How did your retrieval pipeline handle noisy or out-of-domain queries when performing vector similarity search in ChromaDB?"
+                ]
+            elif action == "CLARIFY":
+                q_templates = [
+                    f"Could you walk me through what information you stored in ChromaDB, and what happened between receiving a user query and retrieving context?",
+                    f"How were documents chunked and embedded before indexing into ChromaDB in {p_name}?"
+                ]
+            elif action == "CHALLENGE":
+                q_templates = [
+                    f"Suppose vector search in ChromaDB returns conflicting or irrelevant chunks for a complex prompt in {p_name}. How would your pipeline detect and handle that?",
+                    f"How does your RAG architecture scale if the vector database grows to millions of embeddings with concurrent queries?"
+                ]
+            else:
+                q_templates = [
+                    f"In your work with RAG and ChromaDB on {p_name}, how did you structure the embedding and retrieval pipeline?",
+                    f"What practical trade-offs made ChromaDB suitable for your vector search needs in {p_name}?"
+                ]
+        elif skill == "React":
+            if action == "GO_DEEPER":
+                q_templates = [
+                    f"In {p_name}, how did you structure state management and avoid unnecessary component re-renders when streaming or fetching data from the backend?",
+                    f"How did you handle error boundaries, offline states, and optimistic UI updates in your React frontend on {p_name}?"
+                ]
+            elif action == "CLARIFY":
+                q_templates = [
+                    f"How did your React frontend communicate with the backend REST APIs in {p_name}, and how did you manage authentication state?",
+                    f"What lifecycle hooks or custom state patterns did you rely on most heavily in {p_name}?"
+                ]
+            else:
+                q_templates = [
+                    f"Looking at your React frontend in {p_name}, what was the most complex component hierarchy or state flow you implemented?",
+                    f"How did you ensure responsive rendering and fast initial page loads in your React application for {p_name}?"
+                ]
+        elif skill == "MySQL" or skill == "Database":
+            if action == "GO_DEEPER":
+                q_templates = [
+                    f"In {p_name}, what indexing strategies did you implement on your MySQL tables, and how did you optimize slow queries under load?",
+                    f"How did you manage database transaction isolation levels and prevent deadlocks during concurrent writes in {p_name}?"
+                ]
+            elif action == "CLARIFY":
+                q_templates = [
+                    f"Could you walk me through the schema design in MySQL for {p_name} and how you structured relationships between core entities?",
+                    f"How did you handle database connection pooling and query execution in {p_name}?"
+                ]
+            else:
+                q_templates = [
+                    f"What were the primary data persistence trade-offs you encountered when designing the relational database for {p_name}?",
+                    f"If database write traffic increased significantly in {p_name}, how would you approach partitioning, sharding, or caching?"
+                ]
+        elif skill == "JWT" or skill == "Security":
+            if action == "GO_DEEPER":
+                q_templates = [
+                    f"When implementing JWT authentication in {p_name}, how did you handle token signing, expiration, refresh token rotation, and revocation?",
+                    f"How did you prevent vulnerabilities like token tampering, CSRF, and unauthorized role elevation across your protected endpoints in {p_name}?"
+                ]
+            elif action == "CLARIFY":
+                q_templates = [
+                    f"Walk me through the lifecycle of a request authenticating via JWT from the client to your protected backend endpoints in {p_name}.",
+                    f"How did your backend validate token claims and enforce role-based access control in {p_name}?"
+                ]
+            else:
+                q_templates = [
+                    f"In {p_name}, what security practices did you put in place to ensure sensitive credentials and tokens are protected both in transit and at rest?",
+                    f"How did you structure authentication filters and security headers in your application on {p_name}?"
+                ]
+        elif skill == "Spring Boot":
+            if action == "GO_DEEPER":
+                q_templates = [
+                    f"In your Spring Boot backend for {p_name}, how did you design dependency injection, custom exception handling, and transaction boundaries?",
+                    f"If an endpoint in {p_name} experienced sudden connection pool exhaustion or high thread contention, how would you diagnose and resolve it?"
+                ]
+            elif action == "CLARIFY":
+                q_templates = [
+                    f"How did you structure your controllers, services, and repository layers in Spring Boot for {p_name}?",
+                    f"What validation annotations and interceptors did you rely on in your Spring Boot REST APIs for {p_name}?"
+                ]
+            else:
+                q_templates = [
+                    f"What part of the Spring Boot backend architecture in {p_name} did you personally design and implement?",
+                    f"How did your Spring Boot application handle asynchronous tasks and external service timeouts in {p_name}?"
+                ]
+        elif angle == "SCALABILITY":
+            q_templates = [
+                f"Suppose traffic to {p_name} increases by 100x. What is the very first bottleneck you would expect in your {skill} layer, and how would you re-architect it?",
+                f"How would you horizontally scale the {skill} components in {p_name} across multiple nodes while keeping latency low?"
+            ]
+        elif angle == "DEBUGGING" or angle == "FAILURE":
+            q_templates = [
+                f"Suppose an endpoint in {p_name} using {skill} intermittently times out during peak hours. Walk me step-by-step through how you isolate the root cause.",
+                f"How does {p_name} recover gracefully if downstream {skill} services crash or become unreachable?"
+            ]
+        else:
+            q_templates = [
+                f"Looking at your experience with {skill} on {p_name}, what was the most challenging technical feature you implemented, and what trade-offs did you face?",
+                f"How did your {skill} module in {p_name} communicate with other components, and how did you handle operational errors?"
+            ]
 
     chosen_q = None
     for q_cand in q_templates:
@@ -1692,7 +2364,16 @@ Respond STRICTLY in JSON:
             break
 
     if not chosen_q:
-        chosen_q = f"In {p_name}, when designing the {skill} layer for {perspective.lower().replace('_', ' ')}, what specific architectural decisions did you make?"
+        if section == "TECHNICAL_SKILLS":
+            chosen_q = f"You list {skill} among your technical skills. Could you explain how you apply it and what key design patterns you use?"
+        elif section in ["EXPERIENCE", "INTERNSHIPS", "WORK_EXPERIENCE"]:
+            chosen_q = f"In your work experience, what responsibilities did you personally handle when working with {skill}?"
+        elif section == "EDUCATION":
+            chosen_q = f"In your academic studies, what relevant technical coursework or projects did you complete involving {skill}?"
+        elif section == "CERTIFICATIONS":
+            chosen_q = f"Regarding your certification in {skill}, what key practical concepts did you learn?"
+        else:
+            chosen_q = f"In {p_name}, when designing the {skill} layer for {perspective.lower().replace('_', ' ')}, what specific architectural decisions did you make?"
 
     fp_final = normalize_fingerprint(chosen_q)
     full_speech = f"{transition_speech} {chosen_q}".strip() if transition_speech else chosen_q
@@ -1704,15 +2385,17 @@ Respond STRICTLY in JSON:
             "question_text": chosen_q,
             "full_speech_text": full_speech,
             "question_category": perspective,
-            "question_source": f"Resume AI Interviewer -> {perspective} ({angle})",
-            "topic": f"{skill} {angle.capitalize()}",
+            "question_source": f"Resume AI Interviewer -> {section}:{perspective} ({angle})",
+            "topic": f"{skill} {angle.capitalize()}" if section == "PROJECTS" else f"{section.replace('_', ' ').title()}: {skill}",
             "subtopic": subtopic,
             "skill": skill,
-            "project": project,
+            "project": project if section == "PROJECTS" else None,
+            "section": section,
+            "context_type": context_type,
             "angle": angle,
             "question_type": style,
             "semantic_fingerprint": fp_final,
-            "hints": [f"Explain {skill} in {p_name}", f"Address {angle.lower()} trade-offs"],
+            "hints": [f"Explain {skill} in detail", f"Address {angle.lower()} trade-offs"],
             "ideal_key_points": [skill, f"{angle} best practices", "Production reasoning"],
             "difficulty": difficulty,
             "is_completed": action == "END_INTERVIEW"
@@ -1748,6 +2431,8 @@ def validate_question_node(state: ConversationalInterviewState) -> Dict[str, Any
     angle = plan.get("angle", turn.get("angle", "IMPLEMENTATION"))
     project = plan.get("project", turn.get("project", "Project"))
     skill = plan.get("skill", turn.get("skill", "Architecture"))
+    section = plan.get("section") or turn.get("section") or state.get("current_section") or "PROJECTS"
+    context_type = plan.get("context_type") or turn.get("context_type") or state.get("current_context_type") or ("SKILL_CONTEXT" if section == "TECHNICAL_SKILLS" else "PROJECT_CONTEXT")
 
     # Check for semantic / exact duplicate
     fp = turn.get("semantic_fingerprint") or normalize_fingerprint(q_text)
@@ -1780,13 +2465,33 @@ def validate_question_node(state: ConversationalInterviewState) -> Dict[str, Any
         
         replacement_q = None
         for alt_angle in fallback_angles:
-            candidates = [
-                f"In {project}, when engineering {skill} for high-throughput {alt_angle.lower()} resilience, what architectural decisions did you make?",
-                f"How did you isolate and resolve {alt_angle.lower()} bottlenecks in your {skill} layer on {project}?",
-                f"Suppose {alt_angle.lower()} issues emerge in {skill} during peak load on {project}. What are your diagnostic triage steps?",
-                f"What trade-offs did you navigate when designing the {alt_angle.lower()} model for {skill} in {project}?",
-                f"Looking at your work with {skill} on {project}, how did you ensure robust {alt_angle.lower()} performance in production?"
-            ]
+            if section == "TECHNICAL_SKILLS":
+                candidates = [
+                    f"Regarding {skill}, how does the underlying architecture behave under high-throughput {alt_angle.lower()} demands?",
+                    f"How do you isolate and resolve {alt_angle.lower()} bottlenecks when working with {skill}?",
+                    f"Suppose {alt_angle.lower()} issues emerge with {skill} during peak load. What are your diagnostic steps?",
+                    f"What trade-offs did you navigate when designing for {alt_angle.lower()} in {skill}?",
+                    f"Looking at your experience with {skill}, how do you ensure robust {alt_angle.lower()} performance in production?"
+                ]
+            elif section in ["EXPERIENCE", "INTERNSHIPS", "WORK_EXPERIENCE"]:
+                candidates = [
+                    f"In your work experience with {skill}, what decisions did you make regarding {alt_angle.lower()} resilience?",
+                    f"How did you isolate and resolve {alt_angle.lower()} challenges in {skill} during your work experience?",
+                    f"In your hands-on work with {skill}, what trade-offs did you navigate for {alt_angle.lower()}?"
+                ]
+            elif section == "EDUCATION":
+                candidates = [
+                    f"In your academic studies with {skill}, how did you approach {alt_angle.lower()} principles?",
+                    f"What core coursework foundations prepared you for {alt_angle.lower()} challenges in {skill}?"
+                ]
+            else:
+                candidates = [
+                    f"In {project}, when engineering {skill} for high-throughput {alt_angle.lower()} resilience, what architectural decisions did you make?",
+                    f"How did you isolate and resolve {alt_angle.lower()} bottlenecks in your {skill} layer on {project}?",
+                    f"Suppose {alt_angle.lower()} issues emerge in {skill} during peak load on {project}. What are your diagnostic triage steps?",
+                    f"What trade-offs did you navigate when designing the {alt_angle.lower()} model for {skill} in {project}?",
+                    f"Looking at your work with {skill} on {project}, how did you ensure robust {alt_angle.lower()} performance in production?"
+                ]
             for cand in candidates:
                 cand_fp = normalize_fingerprint(cand)
                 cand_lower = cand.lower()
@@ -1798,11 +2503,111 @@ def validate_question_node(state: ConversationalInterviewState) -> Dict[str, Any
                 break
         
         if not replacement_q:
-            replacement_q = f"In {project}, regarding {skill} under round {round_num}, how did you validate end-to-end reliability?"
+            if section == "TECHNICAL_SKILLS":
+                replacement_q = f"Under round {round_num}, regarding {skill}, what core engineering principles guide your implementation?"
+            elif section in ["EXPERIENCE", "INTERNSHIPS", "WORK_EXPERIENCE"]:
+                replacement_q = f"Under round {round_num}, in your work experience with {skill}, what was your primary responsibility?"
+            else:
+                replacement_q = f"In {project}, regarding {skill} under round {round_num}, how did you validate end-to-end reliability?"
 
         turn["question_text"] = replacement_q
         turn["full_speech_text"] = f"{plan.get('transition_speech', '')} {replacement_q}".strip() if contains_skipped else replacement_q
         turn["semantic_fingerprint"] = normalize_fingerprint(replacement_q)
+
+    # Resume-wide section enforcement: if section is not PROJECTS, ensure question doesn't mistakenly question about a project
+    current_q_text = turn.get("question_text", "")
+
+    project_names = [p.lower() for p in (state.get("priority_projects") or []) if p and len(p) >= 3]
+    if project and project != "your project":
+        project_names.append(project.lower())
+
+    mentions_project_in_non_project = False
+    if section != "PROJECTS":
+        q_lower = current_q_text.lower()
+        if any(phrase in q_lower for phrase in ["in your project", "on your project", "for your project", "of your project"]):
+            mentions_project_in_non_project = True
+        for pname in project_names:
+            if pname in q_lower and pname not in ["project", "your project"]:
+                mentions_project_in_non_project = True
+                break
+
+    if mentions_project_in_non_project:
+        validation_result = "REJECTED_PROJECT_MENTION_IN_NON_PROJECT_SECTION"
+        logger.warning(f"Validation rejected non-project question mentioning project: {current_q_text}")
+        skill_cands = []
+        if section == "TECHNICAL_SKILLS":
+            if skill in ["Spring Boot", "Spring"]:
+                skill_cands = [
+                    "You list Spring Boot among your technical skills. Could you explain how dependency injection works in the framework, perhaps using an example?",
+                    "How does dependency injection in Spring Boot reduce coupling, and how would you use constructor injection to make a service easier to test?",
+                    "In Spring Boot, how does the application context manage bean lifecycles, and how do you handle circular dependencies?",
+                    "In Spring Boot REST APIs, how do you handle global exception handling and request validation?"
+                ]
+            elif skill in ["Java", "Core Java"]:
+                skill_cands = [
+                    "How would you choose between an ArrayList and a HashSet for a particular use case, and what are their time complexities?",
+                    "In core Java, how does a HashMap differ from a TreeMap, and when would you choose each?",
+                    "Could you explain the difference between checked and unchecked exceptions in Java and when to use each?",
+                    "In Java, how do concurrent collections like ConcurrentHashMap achieve thread safety without locking the whole map?"
+                ]
+            elif skill in ["MySQL", "SQL"]:
+                skill_cands = [
+                    "You list MySQL among your technical skills. How do you approach table indexing, and which types of queries are you most comfortable writing?",
+                    "In MySQL, how do B-tree indexes work under the hood, and how do composite indexes impact query execution plans?",
+                    "How do transaction isolation levels like READ COMMITTED versus REPEATABLE READ prevent concurrency anomalies in MySQL?"
+                ]
+            elif skill in ["React", "ReactJS"]:
+                skill_cands = [
+                    "You list React among your technical skills. Could you walk me through how state management and component re-rendering work in modern React?",
+                    "In React, how does the Virtual DOM reconciliation algorithm work, and when should you optimize re-renders using useMemo or useCallback?",
+                    "In React, how do you manage state across sibling or nested components without prop drilling?"
+                ]
+            else:
+                skill_cands = [
+                    f"You list {skill} among your technical skills on your resume. Could you explain its core concepts and how you have worked with it?",
+                    f"What architectural advantages or practical benefits have you found when applying {skill}?",
+                    f"How do you handle error handling, performance tuning, and edge cases when working with {skill}?"
+                ]
+        elif section in ["EXPERIENCE", "INTERNSHIPS", "WORK_EXPERIENCE"]:
+            skill_cands = [
+                f"Looking at your experience on your resume, what were the main responsibilities and technical tasks you personally handled with {skill}?",
+                f"In your work experience, what was a specific technical challenge or debugging problem you encountered in {skill}, and how did you resolve it?",
+                f"In your internship and work experience, what was the most impactful feature or technical contribution you personally delivered using {skill}?"
+            ]
+        elif section == "EDUCATION":
+            skill_cands = [
+                f"Looking at your education on your resume, what relevant coursework or technical subjects did you focus on most heavily?",
+                f"In your academic studies, how did you apply {skill} or core computer science fundamentals to your coursework projects?"
+            ]
+        elif section == "CERTIFICATIONS":
+            skill_cands = [
+                f"Regarding your certification in {skill}, what core practical concepts did you master?",
+                f"How did the preparation for your {skill} certification help your day-to-day software engineering decisions?"
+            ]
+        else:
+            skill_cands = [
+                f"Regarding {skill}, what core engineering principles do you follow?"
+            ]
+
+        replacement_q = None
+        for cand in skill_cands:
+            cand_fp = normalize_fingerprint(cand)
+            if cand_fp not in seen_set:
+                replacement_q = cand
+                break
+        if not replacement_q:
+            round_num = state.get("round_number", 1)
+            replacement_q = f"Under turn {round_num}, could you walk me through your engineering principles when working with {skill}?"
+
+        turn["question_text"] = replacement_q
+        turn["full_speech_text"] = f"{plan.get('transition_speech', '')} {replacement_q}".strip()
+        turn["semantic_fingerprint"] = normalize_fingerprint(replacement_q)
+        turn["section"] = section
+        turn["context_type"] = context_type
+        turn["project"] = None
+
+    turn["section"] = section
+    turn["context_type"] = context_type
 
     # Section 41: Development Debug Logging
     debug_banner = f"""
@@ -1811,6 +2616,7 @@ def validate_question_node(state: ConversationalInterviewState) -> Dict[str, Any
 SESSION ID:            {session_id}
 CANDIDATE ID:          {candidate_id}
 PERSPECTIVE:           {perspective}
+SECTION:               {section} ({context_type})
 CURRENT TOPIC:         {topic}
 CURRENT PROJECT:       {project}
 CURRENT TECHNOLOGY:    {skill}
@@ -1996,6 +2802,12 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
     exhausted_topics = list(persisted.get("exhausted_topics", []))
     topics_discussed = list(persisted.get("topics_discussed", []))
     claims_explored = list(persisted.get("claims_explored", []))
+    section_coverage = persisted.get("section_coverage")
+    project_coverage = persisted.get("project_coverage")
+    current_section = persisted.get("current_section")
+    current_project = persisted.get("current_project")
+    current_context_type = persisted.get("current_context_type")
+    selection_level = persisted.get("selection_level")
     
     # Fallback reconstruction from request.previous_interactions if persistent state empty
     if not persisted and request.previous_interactions:
@@ -2016,6 +2828,31 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
                     current_topic = top
                 if subtop:
                     current_subtopic = subtop
+                if interaction.get("section"):
+                    current_section = interaction["section"]
+                if interaction.get("project"):
+                    current_project = interaction["project"]
+
+        # Reconstruct coverage counters from previous interactions
+        if not section_coverage or not project_coverage:
+            sec_cov, proj_cov = init_or_update_coverage_state(request.resume_context or {})
+            for interaction in request.previous_interactions:
+                if isinstance(interaction, dict):
+                    sec = interaction.get("section") or "PROJECTS"
+                    proj = interaction.get("project")
+                    act = interaction.get("action")
+                    ans_str = str(interaction.get("answer", "")).lower()
+                    if sec in sec_cov:
+                        sec_cov[sec]["questions_asked"] += 1
+                        if act in ["SWITCH_TOPIC", "SWITCH_SECTION"] or "unknown" in ans_str or "don't know" in ans_str or "not sure" in ans_str:
+                            sec_cov[sec]["unknown_answers"] += 1
+                    if proj and proj in proj_cov:
+                        if act in ["SWITCH_TOPIC", "SWITCH_SECTION"] or "unknown" in ans_str or "don't know" in ans_str or "not sure" in ans_str:
+                            proj_cov[proj]["unknown_answers"] += 1
+                            if proj_cov[proj]["unknown_answers"] >= 2:
+                                proj_cov[proj]["status"] = "LOW_EVIDENCE"
+            section_coverage = sec_cov
+            project_coverage = proj_cov
 
     state_input: ConversationalInterviewState = {
         "session_id": session_id,
@@ -2056,6 +2893,12 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
         "allow_same_topic_follow_up": persisted.get("allow_same_topic_follow_up", True),
         "reason_code": persisted.get("reason_code"),
         "topics_discussed": topics_discussed,
+        "current_section": current_section,
+        "current_project": current_project,
+        "current_context_type": current_context_type,
+        "section_coverage": section_coverage,
+        "project_coverage": project_coverage,
+        "selection_level": selection_level,
         "plan": None,
         "generated_turn": None,
         "errors": []
@@ -2081,7 +2924,13 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
         "topics_discussed": result.get("topics_discussed", []),
         "claims_explored": result.get("claims_explored", []),
         "allow_same_topic_follow_up": result.get("allow_same_topic_follow_up", False),
-        "reason_code": result.get("reason_code")
+        "reason_code": result.get("reason_code"),
+        "current_section": result.get("current_section") or plan.get("section"),
+        "current_project": result.get("current_project") or plan.get("project"),
+        "current_context_type": result.get("current_context_type") or plan.get("context_type"),
+        "section_coverage": result.get("section_coverage"),
+        "project_coverage": result.get("project_coverage"),
+        "selection_level": result.get("selection_level") or plan.get("selection_level")
     }
 
     return GenerateQuestionResponse(
@@ -2109,6 +2958,10 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
         clarification_attempted=result.get("clarification_attempted"),
         current_topic_state=result.get("current_topic_state"),
         reason_code=result.get("reason_code"),
-        skipped_subtopics=result.get("skipped_subtopics", [])
+        skipped_subtopics=result.get("skipped_subtopics", []),
+        section=turn.get("section") or plan.get("section") or result.get("current_section") or "PROJECTS",
+        context_type=turn.get("context_type") or plan.get("context_type") or result.get("current_context_type") or "PROJECT_CONTEXT",
+        section_coverage=result.get("section_coverage"),
+        project_coverage=result.get("project_coverage")
     )
 

@@ -350,20 +350,41 @@ def retrieve_relevant_resume_knowledge(
     candidate_id: str,
     resume_id: Optional[str],
     query_text: str,
-    n_results: int = 4
+    n_results: int = 4,
+    section: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Queries ChromaDB with candidate isolation filter.
+    Queries ChromaDB with candidate isolation filter and optional section filter.
     Returns matched knowledge chunks, claims, and metadata.
     """
     collection = get_chroma_client()
     candidate_id_str = str(candidate_id)
 
+    # Normalize section name for ChromaDB metadata
+    section_map = {
+        "TECHNICAL_SKILLS": "skills",
+        "SKILLS": "skills",
+        "PROJECTS": "projects",
+        "EXPERIENCE": "experience",
+        "INTERNSHIPS": "experience",
+        "WORK_EXPERIENCE": "experience",
+        "EDUCATION": "education",
+        "PROFILE_SUMMARY": "summary",
+        "SUMMARY": "summary"
+    }
+    target_sec = section_map.get(str(section).upper()) if section else None
+
     try:
+        filter_conditions = [{"candidate_id": candidate_id_str}]
         if resume_id and str(resume_id) not in ["None", "current_active_resume", ""]:
-            where_filter: Dict[str, Any] = {"$and": [{"candidate_id": candidate_id_str}, {"resume_id": str(resume_id)}]}
+            filter_conditions.append({"resume_id": str(resume_id)})
+        if target_sec:
+            filter_conditions.append({"section": target_sec})
+
+        if len(filter_conditions) == 1:
+            where_filter: Dict[str, Any] = filter_conditions[0]
         else:
-            where_filter: Dict[str, Any] = {"candidate_id": candidate_id_str}
+            where_filter = {"$and": filter_conditions}
         
         # Check if collection has documents for candidate
         count = collection.count()
