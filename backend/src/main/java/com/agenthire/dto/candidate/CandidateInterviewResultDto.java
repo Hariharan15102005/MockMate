@@ -33,5 +33,6 @@ public class CandidateInterviewResultDto {
     private List<String> strengths;
     private List<String> improvementAreas;
     private List<Map<String, Object>> questionEvaluations;
+    private Map<String, Object> comprehensiveAnalysis;
     private Instant completedAt;
 }

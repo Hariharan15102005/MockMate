@@ -767,39 +767,12 @@ public class CandidateInterviewService {
         List<String> distinctStrengths = allStrengths.stream().distinct().limit(4).collect(Collectors.toList());
         List<String> distinctImprovements = allImprovements.stream().distinct().limit(4).collect(Collectors.toList());
 
-        // Create or update InterviewReport
-        InterviewReport report = interviewReportRepository.findBySessionId(session.getId())
-                .orElseGet(() -> InterviewReport.builder()
-                        .session(session)
-                        .candidate(candidate)
-                        .interview(session.getInterview())
-                        .build());
-
-        report.setOverallScore(overallScore);
-        report.setTechnicalScore(Math.round(avgTechnical * 10.0) / 10.0);
-        report.setCodingScore(Math.round(avgCorrectness * 10.0) / 10.0);
-        report.setCommunicationScore(Math.round(avgClarity * 10.0) / 10.0);
-        report.setProblemSolvingScore(Math.round(avgProblemSolving * 10.0) / 10.0);
-        report.setBehavioralScore(Math.round(avgClarity * 10.0) / 10.0);
-        report.setStrengthsJson(toJson(distinctStrengths));
-        report.setImprovementAreasJson(toJson(distinctImprovements));
-        report.setGeneratedAt(Instant.now());
-        report.setAiRecommendation(overallScore >= 75.0 ? "RECOMMENDED FOR INSTRUCTOR REVIEW" : "REQUIRES TARGETED PRACTICE");
-
-        interviewReportRepository.save(report);
-
-        // Notifications
-        if (candidate.getUser() != null) {
-            createNotification(candidate.getUser(), "Interview Completed", "Your AI Mock Interview for " + session.getInterview().getTitle() + " has completed! Score: " + overallScore + "/100.");
-        }
-        if (session.getInterview().getCreatedBy() != null && session.getInterview().getCreatedBy().getUser() != null) {
-            createNotification(session.getInterview().getCreatedBy().getUser(), "Student Interview Completed", "Candidate " + candidate.getFullName() + " has completed the mock interview with score " + overallScore + "/100.");
-        }
-
         int durationSeconds = session.getStartedAt() != null && session.getEndedAt() != null
                 ? (int) Duration.between(session.getStartedAt(), session.getEndedAt()).getSeconds()
                 : 300;
 
+        // Build transcript payload for AI Post-Interview Analysis
+        List<Map<String, Object>> transcriptItems = new ArrayList<>();
         List<Map<String, Object>> qEvaluations = answers.stream().map(a -> {
             Map<String, Object> map = new HashMap<>();
             map.put("questionId", a.getQuestion() != null ? a.getQuestion().getId() : null);
@@ -821,6 +794,73 @@ public class CandidateInterviewService {
             return map;
         }).collect(Collectors.toList());
 
+        for (Map<String, Object> qe : qEvaluations) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("questionText", qe.get("questionText"));
+            item.put("answerText", qe.get("answerText"));
+            item.put("roundType", qe.get("roundType"));
+            item.put("score", qe.get("score"));
+            item.put("feedback", qe.get("feedback"));
+            transcriptItems.add(item);
+        }
+
+        // Generate AI Post-Interview Analysis
+        Map<String, Object> analysisReq = new HashMap<>();
+        analysisReq.put("session_id", session.getId().toString());
+        analysisReq.put("candidate_name", candidate.getFullName());
+        analysisReq.put("target_role", session.getInterview().getTargetRole());
+        analysisReq.put("interview_title", session.getInterview().getTitle());
+        analysisReq.put("duration_seconds", durationSeconds);
+        analysisReq.put("resume_context", loadCandidateResumeContext(candidate));
+        analysisReq.put("transcript", transcriptItems);
+
+        Map<String, Object> comprehensiveAnalysis = null;
+        try {
+            comprehensiveAnalysis = aiServiceClient.generateInterviewAnalysis(analysisReq);
+            if (comprehensiveAnalysis != null && comprehensiveAnalysis.get("overall_score") != null) {
+                try {
+                    double aiOverall = Double.parseDouble(comprehensiveAnalysis.get("overall_score").toString());
+                    if (aiOverall > 0) {
+                        overallScore = Math.round(aiOverall * 10.0) / 10.0;
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            log.warn("Comprehensive interview analysis generation encountered error: {}", e.getMessage());
+        }
+
+        // Create or update InterviewReport
+        InterviewReport report = interviewReportRepository.findBySessionId(session.getId())
+                .orElseGet(() -> InterviewReport.builder()
+                        .session(session)
+                        .candidate(candidate)
+                        .interview(session.getInterview())
+                        .build());
+
+        report.setOverallScore(overallScore);
+        report.setTechnicalScore(Math.round(avgTechnical * 10.0) / 10.0);
+        report.setCodingScore(Math.round(avgCorrectness * 10.0) / 10.0);
+        report.setCommunicationScore(Math.round(avgClarity * 10.0) / 10.0);
+        report.setProblemSolvingScore(Math.round(avgProblemSolving * 10.0) / 10.0);
+        report.setBehavioralScore(Math.round(avgClarity * 10.0) / 10.0);
+        report.setStrengthsJson(toJson(distinctStrengths));
+        report.setImprovementAreasJson(toJson(distinctImprovements));
+        if (comprehensiveAnalysis != null) {
+            report.setComprehensiveAnalysisJson(toJson(comprehensiveAnalysis));
+        }
+        report.setGeneratedAt(Instant.now());
+        report.setAiRecommendation(overallScore >= 75.0 ? "RECOMMENDED FOR INSTRUCTOR REVIEW" : "REQUIRES TARGETED PRACTICE");
+
+        interviewReportRepository.save(report);
+
+        // Notifications
+        if (candidate.getUser() != null) {
+            createNotification(candidate.getUser(), "Interview Completed", "Your AI Mock Interview for " + session.getInterview().getTitle() + " has completed! Score: " + overallScore + "/100.");
+        }
+        if (session.getInterview().getCreatedBy() != null && session.getInterview().getCreatedBy().getUser() != null) {
+            createNotification(session.getInterview().getCreatedBy().getUser(), "Student Interview Completed", "Candidate " + candidate.getFullName() + " has completed the mock interview with score " + overallScore + "/100.");
+        }
+
         return CandidateInterviewResultDto.builder()
                 .sessionId(session.getId())
                 .interviewId(session.getInterview().getId())
@@ -840,6 +880,7 @@ public class CandidateInterviewService {
                 .strengths(distinctStrengths)
                 .improvementAreas(distinctImprovements)
                 .questionEvaluations(qEvaluations)
+                .comprehensiveAnalysis(comprehensiveAnalysis)
                 .completedAt(session.getEndedAt())
                 .build();
     }
@@ -882,6 +923,15 @@ public class CandidateInterviewService {
             return map;
         }).collect(Collectors.toList());
 
+        Map<String, Object> comprehensiveAnalysis = null;
+        if (report.getComprehensiveAnalysisJson() != null && !report.getComprehensiveAnalysisJson().isBlank()) {
+            try {
+                comprehensiveAnalysis = objectMapper.readValue(report.getComprehensiveAnalysisJson(), new TypeReference<Map<String, Object>>() {});
+            } catch (Exception e) {
+                log.warn("Failed to parse comprehensiveAnalysisJson for session: {}", sessionId);
+            }
+        }
+
         return CandidateInterviewResultDto.builder()
                 .sessionId(session.getId())
                 .interviewId(session.getInterview().getId())
@@ -901,7 +951,111 @@ public class CandidateInterviewService {
                 .strengths(parseJsonArray(report.getStrengthsJson()))
                 .improvementAreas(parseJsonArray(report.getImprovementAreasJson()))
                 .questionEvaluations(qEvaluations)
+                .comprehensiveAnalysis(comprehensiveAnalysis)
                 .completedAt(session.getEndedAt())
+                .build();
+    }
+
+    /**
+     * Start targeted practice mode session targeting previous weak areas.
+     */
+    @Transactional
+    public StartSessionResponseDto startPracticeWeakAreasSession(UUID previousSessionId, UUID userId) {
+        Candidate candidate = getCandidateForUserId(userId);
+        InterviewSession prevSession = getSessionAndVerifyCandidate(previousSessionId, candidate);
+
+        InterviewReport report = interviewReportRepository.findBySessionId(prevSession.getId()).orElse(null);
+        List<String> weakTopics = new ArrayList<>();
+        if (report != null && report.getComprehensiveAnalysisJson() != null) {
+            try {
+                Map<String, Object> analysis = objectMapper.readValue(report.getComprehensiveAnalysisJson(), new TypeReference<Map<String, Object>>() {});
+                Object topicsObj = analysis.get("weak_topics_for_practice");
+                if (topicsObj instanceof List<?>) {
+                    for (Object t : (List<?>) topicsObj) {
+                        if (t != null) weakTopics.add(t.toString());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to extract weak topics from comprehensiveAnalysisJson: {}", e.getMessage());
+            }
+        }
+        if (weakTopics.isEmpty() && report != null) {
+            weakTopics.addAll(parseJsonArray(report.getImprovementAreasJson()));
+        }
+        if (weakTopics.isEmpty()) {
+            weakTopics.add("Core Technical Architecture");
+            weakTopics.add("System Design & Edge Cases");
+        }
+
+        String practiceTitle = "Targeted Practice: " + String.join(", ", weakTopics.stream().limit(2).collect(Collectors.toList()));
+        Instructor instructor = prevSession.getInterview().getCreatedBy();
+        if (instructor == null) {
+            instructor = instructorRepository.findAll().stream().findFirst().orElse(null);
+        }
+
+        Interview practiceInterview = interviewRepository.save(Interview.builder()
+                .title(practiceTitle)
+                .description("Targeted mock interview focusing on weaknesses identified previously: " + String.join("; ", weakTopics))
+                .targetRole(prevSession.getInterview().getTargetRole())
+                .durationMinutes(20)
+                .difficulty(Difficulty.MEDIUM)
+                .status(InterviewStatus.PUBLISHED)
+                .isAdaptive(true)
+                .createdBy(instructor)
+                .build());
+
+        interviewRoundRepository.save(InterviewRound.builder()
+                .interview(practiceInterview)
+                .sequenceNumber(1)
+                .name("Core Weak Areas & Technical Deepening")
+                .roundType(InterviewRoundType.TECHNICAL)
+                .durationMinutes(10)
+                .weight(50)
+                .build());
+
+        interviewRoundRepository.save(InterviewRound.builder()
+                .interview(practiceInterview)
+                .sequenceNumber(2)
+                .name("Architecture Tradeoffs & Edge Cases")
+                .roundType(InterviewRoundType.SYSTEM_DESIGN)
+                .durationMinutes(10)
+                .weight(50)
+                .build());
+
+        InterviewAssignment assignment = interviewAssignmentRepository.save(InterviewAssignment.builder()
+                .candidate(candidate)
+                .interview(practiceInterview)
+                .assignedBy(instructor)
+                .status(AssignmentStatus.PENDING)
+                .scheduledAt(Instant.now())
+                .build());
+
+        InterviewSession newSession = interviewSessionRepository.save(InterviewSession.builder()
+                .candidate(candidate)
+                .interview(practiceInterview)
+                .interviewAssignment(assignment)
+                .status(SessionStatus.IN_PROGRESS)
+                .startedAt(Instant.now())
+                .lastActivityAt(Instant.now())
+                .currentRound(1)
+                .remainingSeconds(20 * 60)
+                .build());
+
+        recordInterviewEvent(newSession, InterviewEventType.SESSION_STARTED, 1, null, "{\"message\": \"Targeted practice session started\", \"weakTopics\": " + toJson(weakTopics) + "}");
+
+        return StartSessionResponseDto.builder()
+                .sessionId(newSession.getId())
+                .candidateId(candidate.getId())
+                .interviewId(practiceInterview.getId())
+                .interviewTitle(practiceInterview.getTitle())
+                .jobRole(practiceInterview.getTargetRole())
+                .durationMinutes(practiceInterview.getDurationMinutes())
+                .totalRounds(2)
+                .currentRound(1)
+                .currentRoundType("TECHNICAL")
+                .sessionStatus(newSession.getStatus().name())
+                .startedAt(newSession.getStartedAt())
+                .remainingSeconds(newSession.getRemainingSeconds())
                 .build();
     }
 

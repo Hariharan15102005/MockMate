@@ -4,12 +4,15 @@ from app.schemas.interview import (
     GenerateQuestionRequest,
     GenerateQuestionResponse,
     EvaluateAnswerRequest,
-    EvaluateAnswerResponse
+    EvaluateAnswerResponse,
+    AnalyzeInterviewSessionRequest,
+    PostInterviewAnalysisResponse
 )
 from app.agents.interview_graph import (
     generate_interview_question,
     evaluate_candidate_answer
 )
+from app.services.session_analysis_service import analyze_completed_interview_session
 
 logger = logging.getLogger(__name__)
 
@@ -48,3 +51,21 @@ async def evaluate_answer_endpoint(request: EvaluateAnswerRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to evaluate candidate answer: {str(e)}"
         )
+
+@router.post(
+    "/analyze-session",
+    response_model=PostInterviewAnalysisResponse,
+    summary="Generate Post-Interview Performance Analysis & Improvement Roadmap",
+    description="Analyzes completed interview session transcripts across 6 categories, generates strengths, weaknesses with actionable corrections, skills matrix, and a personalized 7-day study plan."
+)
+async def analyze_session_endpoint(request: AnalyzeInterviewSessionRequest):
+    try:
+        response = analyze_completed_interview_session(request)
+        return response
+    except Exception as e:
+        logger.error(f"Error generating interview session analysis: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to analyze interview session: {str(e)}"
+        )
+

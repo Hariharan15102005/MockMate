@@ -92,6 +92,9 @@ public class InterviewReport extends BaseEntity {
     @Column(name = "behavioral_summary_json", columnDefinition = "TEXT")
     private String behavioralSummaryJson;
 
+    @Column(name = "comprehensive_analysis_json", columnDefinition = "LONGTEXT")
+    private String comprehensiveAnalysisJson;
+
     @Column(name = "ai_recommendation", length = 100)
     private String aiRecommendation;
 

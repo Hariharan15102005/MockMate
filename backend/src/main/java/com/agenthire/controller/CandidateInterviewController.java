@@ -146,6 +146,16 @@ public class CandidateInterviewController {
         return ResponseEntity.ok(candidateInterviewService.getCandidateResult(sessionId, principal.getId()));
     }
 
+    @PostMapping("/api/candidate/interviews/sessions/{sessionId}/practice-weak-areas")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Start targeted practice interview session based on previous weak areas")
+    public ResponseEntity<StartSessionResponseDto> practiceWeakAreas(
+            @PathVariable("sessionId") UUID sessionId,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return ResponseEntity.ok(candidateInterviewService.startPracticeWeakAreasSession(sessionId, principal.getId()));
+    }
+
     @GetMapping("/api/instructor/interviews/sessions/{sessionId}/report")
     @PreAuthorize("hasRole('INSTRUCTOR')")
     @Operation(summary = "Get instructor detailed evaluation report")

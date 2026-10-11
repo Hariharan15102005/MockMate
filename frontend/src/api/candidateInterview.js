@@ -75,6 +75,11 @@ export const getCandidateResultApi = async (sessionId) => {
   return response.data;
 };
 
+export const startPracticeWeakAreasApi = async (sessionId) => {
+  const response = await client.post(`/api/candidate/interviews/sessions/${sessionId}/practice-weak-areas`);
+  return response.data;
+};
+
 export const getInstructorReportApi = async (sessionId) => {
   const response = await client.get(`/api/instructor/interviews/sessions/${sessionId}/report`);
   return response.data;
@@ -89,5 +94,6 @@ export default {
   recordMediaEventApi,
   completeInterviewApi,
   getCandidateResultApi,
+  startPracticeWeakAreasApi,
   getInstructorReportApi
 };
