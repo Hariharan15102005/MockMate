@@ -330,6 +330,41 @@ Every instructor-facing endpoint verifies that the candidate belongs to an activ
 - `PUT  /api/instructor/interviews/{id}`: Update an existing draft blueprint (fails with 409 if published)
 - `POST /api/instructor/interviews/{id}/publish`: Validate and publish blueprint, rendering it immutable
 
+---
+
+## 5. Phase 13 — Complete Resume-Wide Adaptive Interview Engine
+
+MockMate includes an intelligent 3-level adaptive interview engine orchestrated via FastAPI and LangGraph:
+
+```
+CANDIDATE RESUME
+├── PROJECTS (Project claims in PROJECT_CONTEXT)
+│   ├── LearnSphere (Architecture, Backend, RAG Retrieval, React)
+│   └── SentinelAI (Vulnerability Detection, FastAPI, Docker)
+├── TECHNICAL_SKILLS (Independent skills in SKILL_CONTEXT)
+│   ├── Java (JVM memory, collections, concurrency)
+│   ├── Spring Boot (IoC, dependency injection, bean lifecycle)
+│   ├── React (Virtual DOM, hooks, state reconciliation)
+│   └── MySQL (B-tree indexing, isolation levels, ACID)
+├── EXPERIENCE (Internships & employment in EXPERIENCE_CONTEXT)
+├── EDUCATION (Degree & coursework in EDUCATION_CONTEXT)
+└── CERTIFICATIONS (Verified credentials in CERTIFICATION_CONTEXT)
+```
+
+### 3-Level Adaptation Hierarchy:
+1. **Subtopic Level:** Single explicit unknown skips the immediate subtopic without abandoning the current project or skill.
+2. **Project / Item Level:** Repeated unknowns ($\ge 2$) within a project lower that project's priority and switch to an unexplored project or trigger a section switch.
+3. **Resume-Section Level:** Low evidence across projects triggers a mandatory `SWITCH_SECTION` to `TECHNICAL_SKILLS`, `EXPERIENCE`, or `EDUCATION`.
+4. **Knowledge-Driven Deep Dives:** Strong candidate answers trigger `GO_DEEPER` in the demonstrated skill or project feature.
+
+### Dynamic Section Ranking Formula:
+$$\text{Priority} = \text{Base Relevance} + \text{Unexplored Diversity Boost} + \text{Productive Momentum} - \text{Coverage Penalty} - \text{Low Evidence Penalty}$$
+
+### Strict Anti-Hallucination & Section Isolation:
+- Missing sections (e.g., no certifications) are marked `UNAVAILABLE` and strictly excluded from questioning.
+- Non-project sections (`TECHNICAL_SKILLS`) are enforced by the validator (`validate_question_node`) to never question about candidate projects.
+
+
 
 
 
