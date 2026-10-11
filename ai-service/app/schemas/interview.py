@@ -41,6 +41,11 @@ class GenerateQuestionResponse(BaseModel):
     question_type: Optional[str] = None
     perspective: Optional[str] = None
     perspective_goal: Optional[str] = None
+    allow_same_topic_follow_up: Optional[bool] = None
+    clarification_attempted: Optional[bool] = None
+    current_topic_state: Optional[str] = None
+    reason_code: Optional[str] = None
+    skipped_subtopics: Optional[List[str]] = []
 
 class EvaluateAnswerRequest(BaseModel):
     session_id: str

@@ -100,7 +100,7 @@ def test_4_answer_analysis_i_dont_know():
         "round_number": 3
     }
     analysis = analyze_candidate_answer_node(state)["answer_analysis"]
-    assert analysis["classification"] == "I_DONT_KNOW"
+    assert analysis["classification"] in ["I_DONT_KNOW", "EXPLICIT_UNKNOWN"]
 
 def test_5_answer_analysis_interesting_detail():
     """TEST 5: Unprompted engineering challenge is flagged as INTERESTING_DETAIL."""

@@ -153,24 +153,30 @@ NO_ANSWER_PHRASES = [
 ]
 
 # ========================================================
-# 2. STATE DEFINITIONS
+# 2. STATE DEFINITIONS & ENUMS
 # ========================================================
+
+# Session state store across separate HTTP turns
+_session_interview_state: Dict[str, Dict[str, Any]] = {}
 
 class StructuredClaim(TypedDict):
     claim: str
     technology: str
     concept: str
+    subtopic: Optional[str]
     project: Optional[str]
     claim_type: str
     strength: str
 
 class AnswerAnalysis(TypedDict):
-    classification: str # STRONG, PARTIAL, WEAK, NO_ANSWER, I_DONT_KNOW, INTERESTING_DETAIL, OPENER
+    classification: str # STRONG, CORRECT, PARTIAL, WEAK, VAGUE, OFF_TOPIC, NO_ANSWER, EXPLICIT_UNKNOWN, NOT_IMPLEMENTED_BY_CANDIDATE, INTERESTING_DETAIL, OPENER
     concepts_mentioned: List[str]
     technologies_mentioned: List[str]
     interesting_details: List[str]
     word_count: int
     confidence_level: str
+    is_explicit_unknown: bool
+    not_implemented: bool
 
 class InterviewPlan(TypedDict):
     action: str # GO_DEEPER, CLARIFY, CHALLENGE, EXPLORE_NEW_DETAIL, SWITCH_TOPIC, END_INTERVIEW, ASK_QUESTION
@@ -188,6 +194,9 @@ class InterviewPlan(TypedDict):
     transition_speech: str
     semantic_fingerprint: str
     retrieval_query: str
+    allow_same_topic_follow_up: bool
+    clarification_attempted: bool
+    reason_code: Optional[str]
 
 class ConversationalInterviewState(TypedDict):
     session_id: str
@@ -217,7 +226,16 @@ class ConversationalInterviewState(TypedDict):
     retrieval_query: str
     answer_analysis: Optional[AnswerAnalysis]
     current_topic: Optional[str]
+    current_subtopic: Optional[str]
     current_depth: int
+    current_topic_state: Optional[str] # NOT_EXPLORED, IN_PROGRESS, UNDERSTOOD, PARTIALLY_UNDERSTOOD, UNKNOWN, SKIPPED, EXHAUSTED
+    clarification_attempted: bool
+    follow_up_count: int
+    skipped_subtopics: List[str]
+    unknown_topics: List[str]
+    exhausted_topics: List[str]
+    allow_same_topic_follow_up: bool
+    reason_code: Optional[str]
     topics_discussed: List[str]
     plan: Optional[InterviewPlan]
     generated_turn: Optional[Dict[str, Any]]
@@ -270,6 +288,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Engineered scalable REST APIs and backend microservices using Spring Boot in {p_name}",
                 "technology": "Spring Boot",
                 "concept": "REST_ARCHITECTURE",
+                "subtopic": "REST Controllers & Services",
                 "project": p_name,
                 "claim_type": "implementation",
                 "strength": "scalability"
@@ -279,6 +298,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Architected RAG retrieval pipeline with ChromaDB vector store in {p_name}",
                 "technology": "ChromaDB",
                 "concept": "RAG_RETRIEVAL",
+                "subtopic": "Vector Retrieval & Embeddings",
                 "project": p_name,
                 "claim_type": "architecture",
                 "strength": "ai_integration"
@@ -288,6 +308,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Developed interactive UI components and state management in {p_name} using React",
                 "technology": "React",
                 "concept": "STATE_MANAGEMENT",
+                "subtopic": "Component Hierarchy & State Management",
                 "project": p_name,
                 "claim_type": "implementation",
                 "strength": "user_experience"
@@ -297,6 +318,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Designed relational database schema, indexing, and transactional queries for {p_name}",
                 "technology": "MySQL",
                 "concept": "QUERY_OPTIMIZATION",
+                "subtopic": "Schema Design & Indexing",
                 "project": p_name,
                 "claim_type": "optimization",
                 "strength": "performance"
@@ -306,6 +328,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Implemented stateless JWT token authentication and endpoint security in {p_name}",
                 "technology": "JWT",
                 "concept": "JWT_AUTHENTICATION",
+                "subtopic": "Token Validation & Authentication",
                 "project": p_name,
                 "claim_type": "security",
                 "strength": "data_protection"
@@ -315,6 +338,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Trained custom convolutional neural network models and real-time computer vision inference in {p_name}",
                 "technology": "TensorFlow",
                 "concept": "COMPUTER_VISION_CNN",
+                "subtopic": "Model Architecture & Inference",
                 "project": p_name,
                 "claim_type": "model_engineering",
                 "strength": "accuracy"
@@ -324,6 +348,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Implemented distributed Redis caching to accelerate endpoint throughput in {p_name}",
                 "technology": "Redis",
                 "concept": "CACHING_STRATEGY",
+                "subtopic": "Caching Strategy & TTL",
                 "project": p_name,
                 "claim_type": "optimization",
                 "strength": "latency"
@@ -333,6 +358,7 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Containerized application workloads and orchestrated deployments in {p_name}",
                 "technology": "Docker",
                 "concept": "CONTAINERIZATION",
+                "subtopic": "Containerization & Deployment",
                 "project": p_name,
                 "claim_type": "infrastructure",
                 "strength": "reliability"
@@ -345,12 +371,17 @@ def extract_claims_from_context(resume_context: Dict[str, Any]) -> List[Structur
                 "claim": f"Demonstrated engineering proficiency in {s_str} application development",
                 "technology": s_str,
                 "concept": f"{s_str.upper()}_FUNDAMENTALS",
+                "subtopic": f"{s_str} Architecture",
                 "project": None,
                 "claim_type": "fundamentals",
                 "strength": "core_competency"
             })
 
     return claims
+
+# Backward compatibility aliases
+extract_candidate_claims = extract_claims_from_context
+QUESTION_BANK = []
 
 extract_structured_claims = extract_claims_from_context
 
@@ -542,58 +573,50 @@ def select_interview_perspective_node(state: ConversationalInterviewState) -> Di
 # 5. NODE 2: ANALYZE CANDIDATE ANSWER
 # ========================================================
 
-def analyze_candidate_answer_node(state: ConversationalInterviewState) -> Dict[str, Any]:
+def classify_candidate_answer(last_answer: Optional[str], round_number: int = 1) -> AnswerAnalysis:
     """
-    Examines candidate's spoken response.
-    Extracts mentioned concepts, technologies, unprompted details, and classifies response:
-    STRONG / PARTIAL / WEAK / NO_ANSWER / I_DONT_KNOW / INTERESTING_DETAIL / OPENER.
+    Robust Answer Classifier (Parts 4 & 5):
+    Differentiates:
+    - EXPLICIT_UNKNOWN (e.g. "I don't know", "don't know bro", "no idea", "not sure", "don't remember", etc.)
+    - NOT_IMPLEMENTED_BY_CANDIDATE (e.g. "someone else implemented that part", "i didn't implement that module")
+    - PARTIAL (partial knowledge, or admitted uncertainty with contrastive technical substance: "I don't know whether we used HNSW or IVF, but I know we stored the embeddings in ChromaDB")
+    - STRONG (detailed technical explanation with domain concepts)
+    - INTERESTING_DETAIL (unprompted bottleneck, race condition, optimization)
+    - WEAK / VAGUE / NO_ANSWER / OPENER
     """
-    last_answer = (state.get("last_candidate_answer") or "").strip()
-    round_number = state.get("round_number", 1)
-
-    if not last_answer:
+    last_ans = (last_answer or "").strip()
+    if not last_ans:
         if round_number == 1:
-            analysis: AnswerAnalysis = {
+            return {
                 "classification": "OPENER",
                 "concepts_mentioned": [],
                 "technologies_mentioned": [],
                 "interesting_details": [],
                 "word_count": 0,
-                "confidence_level": "NEUTRAL"
+                "confidence_level": "NEUTRAL",
+                "is_explicit_unknown": False,
+                "not_implemented": False
             }
         else:
-            analysis: AnswerAnalysis = {
-                "classification": "RESUME_PROMPT",
+            return {
+                "classification": "NO_ANSWER",
                 "concepts_mentioned": [],
                 "technologies_mentioned": [],
                 "interesting_details": [],
                 "word_count": 0,
-                "confidence_level": "MEDIUM"
+                "confidence_level": "LOW",
+                "is_explicit_unknown": True,
+                "not_implemented": False
             }
-        return {"answer_analysis": analysis}
 
-    lower_ans = last_answer.lower()
+    lower_ans = last_ans.lower()
     words = re.findall(r"\w+", lower_ans)
     word_count = len(words)
 
-    # 1. Check for "I don't know", timeout, or refusal
-    if any(phrase in lower_ans for phrase in [
-        "i don't know", "i do not know", "not sure", "no idea", "don't know",
-        "i haven't worked with", "not familiar", "[no_answer", "timeout"
-    ]) or word_count <= 3:
-        analysis: AnswerAnalysis = {
-            "classification": "I_DONT_KNOW" if "don't know" in lower_ans or "not sure" in lower_ans else "NO_ANSWER",
-            "concepts_mentioned": [],
-            "technologies_mentioned": [],
-            "interesting_details": [],
-            "word_count": word_count,
-            "confidence_level": "LOW"
-        }
-        return {"answer_analysis": analysis}
-
-    # 2. Extract technical entities and domain keywords
+    # 1. Extract technical entities and domain keywords
     tech_patterns = {
         "RAG": [r"\brag\b", r"\bretrieval\b", r"\bvector\b", r"\bembedding\b", r"\bembeddings\b", r"\bchroma\b", r"\bchromadb\b", r"\blangchain\b"],
+        "ChromaDB": [r"\bchroma\b", r"\bchromadb\b"],
         "Spring Boot": [r"\bspring boot\b", r"\bspring\b", r"\bspring security\b", r"\bioc\b", r"\bdependency injection\b"],
         "React": [r"\breact\b", r"\bfrontend\b", r"\bcomponent\b", r"\bhook\b", r"\buseeffect\b", r"\busestate\b", r"\bvirtual dom\b", r"\bstate management\b"],
         "MySQL": [r"\bmysql\b", r"\bsql\b", r"\bpostgres\b", r"\bdatabase\b", r"\bquery\b", r"\bindex\b", r"\bindexing\b", r"\bacid\b", r"\btransaction\b"],
@@ -605,8 +628,8 @@ def analyze_candidate_answer_node(state: ConversationalInterviewState) -> Dict[s
         "REST API": [r"\brest\b", r"\bendpoint\b", r"\bapi\b", r"\bhttp\b", r"\bcontroller\b"]
     }
 
-    found_techs = []
-    found_concepts = []
+    found_techs: List[str] = []
+    found_concepts: List[str] = []
     for tech_name, pats in tech_patterns.items():
         for pat in pats:
             if re.search(pat, lower_ans):
@@ -616,8 +639,8 @@ def analyze_candidate_answer_node(state: ConversationalInterviewState) -> Dict[s
                 if match_concept not in found_concepts:
                     found_concepts.append(match_concept)
 
-    # 3. Discover unprompted interesting details
-    interesting_details = []
+    # 2. Discover unprompted interesting details
+    interesting_details: List[str] = []
     detail_triggers = [
         ("performance bottleneck", ["performance issue", "bottleneck", "slow query", "high latency", "latency"]),
         ("concurrency issue", ["race condition", "deadlock", "thread contention", "starvation"]),
@@ -629,131 +652,369 @@ def analyze_candidate_answer_node(state: ConversationalInterviewState) -> Dict[s
         if any(t in lower_ans for t in triggers):
             interesting_details.append(detail_label)
 
-    # 4. Classify response depth
+    # 3. Check for candidate not implementing feature (Priority 2)
+    not_implemented_patterns = [
+        r"someone else implemented", r"someone else worked on", r"another team member",
+        r"i didn't implement", r"i didnt implement", r"didn't implement that", r"didnt implement that",
+        r"didn't work on that", r"didnt work on that", r"haven't worked on that part", r"havent worked on that part",
+        r"not my module", r"not my implementation", r"i didn't build", r"i didnt build",
+        r"someone else handled", r"another developer"
+    ]
+    not_implemented = any(re.search(p, lower_ans) for p in not_implemented_patterns)
+    if not_implemented:
+        return {
+            "classification": "NOT_IMPLEMENTED_BY_CANDIDATE",
+            "concepts_mentioned": found_concepts,
+            "technologies_mentioned": found_techs,
+            "interesting_details": interesting_details,
+            "word_count": word_count,
+            "confidence_level": "HIGH",
+            "is_explicit_unknown": False,
+            "not_implemented": True
+        }
+
+    # 4. Check for explicit uncertainty / unknown (Priority 1)
+    explicit_unknown_patterns = [
+        r"\bi don't know\b", r"\bi do not know\b", r"\bdon't know\b", r"\bdont know\b",
+        r"\bno idea\b", r"\bhave no idea\b", r"\bnot sure\b", r"\bi'm not sure\b", r"\bim not sure\b",
+        r"\bdon't remember\b", r"\bdont remember\b", r"\bdo not remember\b",
+        r"\bhaven't learned\b", r"\bhavent learned\b", r"\bhave not learned\b",
+        r"\bhaven't worked on\b", r"\bhavent worked on\b", r"\bhaven't worked with\b", r"\bhavent worked with\b",
+        r"\bnot familiar with\b", r"\bnot familiar\b", r"\bam not familiar\b",
+        r"\bcan't explain\b", r"\bcant explain\b", r"\bcannot explain\b", r"\bcan't say\b",
+        r"\bsorry,?\s*i don't know\b", r"\bsorry,?\s*i dont know\b", r"\bsorry,?\s*don't know\b",
+        r"\btimeout\b", r"\[no_answer"
+    ]
+    matches_unknown = any(re.search(p, lower_ans) for p in explicit_unknown_patterns)
+
+    # Check for contrastive nuance:
+    # "I don't know whether we used HNSW or IVF, but I know we stored the embeddings in ChromaDB."
+    # "I don't know the exact parameter name, but we used cosine similarity."
+    contrast_markers = ["but ", "however", "although", "except "]
+    has_contrast = any(cm in lower_ans for cm in contrast_markers)
+    has_tech_substance = (len(found_techs) >= 1 or len(found_concepts) >= 1) and word_count >= 8
+
+    if matches_unknown or (word_count <= 3 and not found_techs and not found_concepts):
+        if has_contrast and has_tech_substance:
+            # Contrastive statement demonstrates partial understanding
+            classification = "PARTIAL"
+            is_explicit_unknown = False
+        else:
+            classification = "EXPLICIT_UNKNOWN"
+            is_explicit_unknown = True
+        return {
+            "classification": classification,
+            "concepts_mentioned": found_concepts,
+            "technologies_mentioned": found_techs,
+            "interesting_details": interesting_details,
+            "word_count": word_count,
+            "confidence_level": "HIGH" if is_explicit_unknown else "MEDIUM",
+            "is_explicit_unknown": is_explicit_unknown,
+            "not_implemented": False
+        }
+
+    # 5. Classify response depth
     if interesting_details and word_count >= 12:
         classification = "INTERESTING_DETAIL"
     elif (word_count >= 25 and (len(found_techs) >= 1 or len(found_concepts) >= 2)) or (word_count >= 20 and len(found_techs) >= 2):
         classification = "STRONG"
-    elif word_count >= 10 or len(found_techs) >= 1:
+    elif word_count >= 8 or len(found_techs) >= 1:
+        # Candidate mentioned key tech (e.g., "We used JWT.") or gave concise answer
         classification = "PARTIAL"
     else:
         classification = "WEAK"
 
-    analysis: AnswerAnalysis = {
+    return {
         "classification": classification,
         "concepts_mentioned": found_concepts,
         "technologies_mentioned": found_techs,
         "interesting_details": interesting_details,
         "word_count": word_count,
-        "confidence_level": "HIGH" if classification in ["STRONG", "INTERESTING_DETAIL"] else ("MEDIUM" if classification == "PARTIAL" else "LOW")
+        "confidence_level": "HIGH" if classification in ["STRONG", "INTERESTING_DETAIL"] else ("MEDIUM" if classification == "PARTIAL" else "LOW"),
+        "is_explicit_unknown": False,
+        "not_implemented": False
     }
 
+def analyze_candidate_answer_node(state: ConversationalInterviewState) -> Dict[str, Any]:
+    """Examines candidate's spoken response using classify_candidate_answer."""
+    last_answer = state.get("last_candidate_answer")
+    round_number = state.get("round_number", 1)
+    analysis = classify_candidate_answer(last_answer, round_number)
     return {"answer_analysis": analysis}
 
 # ========================================================
-# 6. NODE 3: RETRIEVE RESUME CONTEXT (DYNAMIC RETRIEVAL)
+# 6. ENFORCE INTERVIEW DECISION & TOPIC SELECTOR
 # ========================================================
 
-def retrieve_resume_context_node(state: ConversationalInterviewState) -> Dict[str, Any]:
+def enforce_interview_decision(
+    state: ConversationalInterviewState,
+    analysis: AnswerAnalysis,
+    proposed_action: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Queries ChromaDB with candidate isolation filter.
-    Dynamic Query Generation: The query changes based on what the candidate just answered,
-    the active perspective, and the project context (satisfies Section 27).
+    Deterministic Action Validator & Enforcement Engine (Parts 6, 7, 8).
+    Strict priority order:
+    Priority 1: EXPLICIT_UNKNOWN -> SWITCH_TOPIC immediately, allow_same_topic_follow_up=False
+    Priority 2: NOT_IMPLEMENTED_BY_CANDIDATE -> SWITCH_TOPIC immediately, allow_same_topic_follow_up=False
+    Priority 3: Clarification budget exhausted -> SWITCH_TOPIC immediately
+    Priority 4: PARTIAL / WEAK / VAGUE -> CLARIFY (only if clarification not yet attempted)
+    Priority 5: STRONG / CORRECT -> GO_DEEPER (if depth < 3) else SWITCH_TOPIC
     """
-    candidate_id = state.get("candidate_id", "candidate-default")
+    cls = analysis.get("classification")
+    is_unknown = analysis.get("is_explicit_unknown") or cls in ["EXPLICIT_UNKNOWN", "I_DONT_KNOW", "NO_ANSWER"]
+    not_impl = analysis.get("not_implemented") or cls == "NOT_IMPLEMENTED_BY_CANDIDATE"
+    clarification_attempted = state.get("clarification_attempted", False)
+    current_depth = state.get("current_depth", 0)
+
+    # Priority 1: Explicit Unknown
+    if is_unknown:
+        return {
+            "action": "SWITCH_TOPIC",
+            "allow_same_topic_follow_up": False,
+            "clarification_attempted": False,
+            "topic_state": "UNKNOWN",
+            "reason_code": "EXPLICIT_UNKNOWN"
+        }
+
+    # Priority 2: Not Implemented by Candidate
+    if not_impl:
+        return {
+            "action": "SWITCH_TOPIC",
+            "allow_same_topic_follow_up": False,
+            "clarification_attempted": False,
+            "topic_state": "SKIPPED",
+            "reason_code": "NOT_IMPLEMENTED_BY_CANDIDATE"
+        }
+
+    # Priority 3 & 4: Partial / Weak / Vague / Incorrect
+    if cls in ["PARTIAL", "WEAK", "VAGUE", "INCORRECT"]:
+        if clarification_attempted:
+            # Clarification budget is 1. Already clarified once, candidate still uncertain/vague
+            return {
+                "action": "SWITCH_TOPIC",
+                "allow_same_topic_follow_up": False,
+                "clarification_attempted": False,
+                "topic_state": "SKIPPED",
+                "reason_code": "CLARIFICATION_BUDGET_EXHAUSTED"
+            }
+        else:
+            return {
+                "action": "CLARIFY",
+                "allow_same_topic_follow_up": True,
+                "clarification_attempted": True,
+                "topic_state": "PARTIALLY_UNDERSTOOD",
+                "reason_code": "CLARIFY_ONCE"
+            }
+
+    # Priority 5: Strong / Correct / Interesting Detail
+    if cls in ["STRONG", "CORRECT", "INTERESTING_DETAIL"]:
+        if current_depth < 3:
+            return {
+                "action": "EXPLORE_NEW_DETAIL" if cls == "INTERESTING_DETAIL" else "GO_DEEPER",
+                "allow_same_topic_follow_up": True,
+                "clarification_attempted": False,
+                "topic_state": "UNDERSTOOD",
+                "reason_code": "STRONG_ANSWER_PROBE_DEPTH"
+            }
+        else:
+            return {
+                "action": "SWITCH_TOPIC",
+                "allow_same_topic_follow_up": False,
+                "clarification_attempted": False,
+                "topic_state": "EXHAUSTED",
+                "reason_code": "TOPIC_DEPTH_EXHAUSTED"
+            }
+
+    # Opener / Default turn 1
+    if cls == "OPENER" or (state.get("round_number", 1) == 1 and not state.get("last_candidate_answer")):
+        return {
+            "action": "ASK_QUESTION",
+            "allow_same_topic_follow_up": True,
+            "clarification_attempted": False,
+            "topic_state": "IN_PROGRESS",
+            "reason_code": "INTERVIEW_OPENER"
+        }
+
+    # Default action
+    return {
+        "action": proposed_action or "SWITCH_TOPIC",
+        "allow_same_topic_follow_up": False,
+        "clarification_attempted": False,
+        "topic_state": "IN_PROGRESS",
+        "reason_code": "NORMAL_EXPLORATION"
+    }
+
+def select_next_alternative_topic(
+    state: ConversationalInterviewState,
+    current_topic: Optional[str] = None,
+    current_subtopic: Optional[str] = None,
+    current_skill: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Topic Selection Engine (Parts 9, 10, 11):
+    When SWITCH_TOPIC is active, selects a genuine, materially different topic supported by resume.
+    Excludes:
+    - Current failed topic/subtopic/skill
+    - Skipped subtopics and unknown topics
+    - Exhausted topics
+    - Semantic overlap with the failed area
+    """
     resume_context = state.get("resume_context") or {}
-    last_answer = state.get("last_candidate_answer") or ""
-    analysis = state.get("answer_analysis") or {}
-    perspective = state.get("perspective") or "SYSTEM_ARCHITECTURE"
-    projects = state.get("priority_projects") or []
-    project_ref = projects[0] if projects else ""
+    claims = state.get("claims") or extract_claims_from_context(resume_context)
+    skipped = [s.lower() for s in (state.get("skipped_subtopics") or [])]
+    unknown = [u.lower() for u in (state.get("unknown_topics") or [])]
+    exhausted = [e.lower() for e in (state.get("exhausted_topics") or [])]
+    discussed = [d.lower() for d in (state.get("topics_discussed") or [])]
 
-    # Ensure candidate resume is indexed in ChromaDB once
-    global _indexed_candidates
-    if candidate_id not in _indexed_candidates:
-        try:
-            chunk_and_index_resume(
-                candidate_id=candidate_id,
-                resume_id="current_active_resume",
-                resume_data=resume_context
-            )
-            _indexed_candidates.add(candidate_id)
-        except Exception as e:
-            logger.warning(f"Chroma indexing note: {e}")
+    # Words to avoid from the failed topic
+    avoid_words = set()
+    if current_topic:
+        avoid_words.update(current_topic.lower().replace("_", " ").split())
+    if current_subtopic:
+        avoid_words.update(current_subtopic.lower().replace("_", " ").split())
+    if current_skill:
+        avoid_words.update(current_skill.lower().replace("_", " ").split())
+    for s in skipped + unknown:
+        avoid_words.update(s.split())
+    avoid_words = {w for w in avoid_words if len(w) > 3 and w not in ["with", "that", "this", "from", "into", "using"]}
 
-    # Build dynamic query based on candidate's answer + mentioned technologies + perspective
-    mentioned_techs = analysis.get("technologies_mentioned") or []
-    if "RAG" in mentioned_techs:
-        query_text = f"candidate RAG vector retrieval ChromaDB {project_ref}"
-    elif "React" in mentioned_techs:
-        query_text = f"candidate React frontend UI components {project_ref}"
-    elif "MySQL" in mentioned_techs:
-        query_text = f"candidate MySQL database schema queries indexing {project_ref}"
-    elif "JWT" in mentioned_techs:
-        query_text = f"candidate JWT authentication security tokens {project_ref}"
-    elif "Spring Boot" in mentioned_techs:
-        query_text = f"candidate Spring Boot REST APIs backend microservices {project_ref}"
-    elif last_answer:
-        tech_words = " ".join(mentioned_techs)
-        query_text = f"{last_answer[:60]} {tech_words} {perspective} {project_ref}".strip()
+    # Filter claims to those that are genuinely different
+    valid_claims = []
+    for c in claims:
+        tech = c.get("technology", "").lower()
+        concept = c.get("concept", "").lower()
+        subtopic = (c.get("subtopic") or "").lower()
+
+        # Must not match current skill or topic
+        if current_skill and tech == current_skill.lower():
+            continue
+        if current_topic and concept == current_topic.lower():
+            continue
+
+        # Must not match skipped or unknown or exhausted
+        if tech in skipped or tech in unknown or tech in exhausted:
+            continue
+        if concept in skipped or concept in unknown or concept in exhausted:
+            continue
+        if subtopic in skipped or subtopic in unknown:
+            continue
+
+        # Semantic collision check: avoid subtopics sharing distinctive keywords
+        overlap = any(w in tech or w in concept or w in subtopic for w in avoid_words)
+        if overlap:
+            continue
+
+        valid_claims.append(c)
+
+    # 1. Prefer unvisited valid claims
+    unvisited = [c for c in valid_claims if c.get("concept", "").lower() not in discussed and c.get("technology", "").lower() not in discussed]
+    chosen = unvisited[0] if unvisited else (valid_claims[0] if valid_claims else None)
+
+    if chosen:
+        topic = chosen["concept"]
+        subtopic = chosen.get("subtopic") or f"{chosen['technology']} Fundamentals"
+        skill = chosen["technology"]
+        project = chosen.get("project") or (state.get("priority_projects") or ["Project"])[0]
+        claim_text = chosen.get("claim")
     else:
-        query_text = f"candidate projects technical architecture {perspective} {project_ref}".strip()
-
-    retrieved = retrieve_relevant_resume_knowledge(
-        candidate_id=candidate_id,
-        resume_id=None,
-        query_text=query_text,
-        n_results=4
-    )
+        # Fallback to alternate core standard domain
+        default_alternatives = [
+            ("Spring Boot", "REST_ARCHITECTURE", "Backend Service Architecture"),
+            ("MySQL", "DATABASE_DESIGN", "Schema Design & Transactions"),
+            ("React", "FRONTEND_STATE", "Component State Management"),
+            ("JWT", "SECURITY_AUTH", "Token Authentication & Protection"),
+            ("Redis", "CACHING_LAYER", "Caching & Latency Optimization")
+        ]
+        chosen_alt = None
+        for tech_alt, top_alt, sub_alt in default_alternatives:
+            if tech_alt.lower() != (current_skill or "").lower() and tech_alt.lower() not in skipped and tech_alt.lower() not in unknown:
+                chosen_alt = (tech_alt, top_alt, sub_alt)
+                break
+        if chosen_alt:
+            skill, topic, subtopic = chosen_alt
+            project = (state.get("priority_projects") or ["Project"])[0]
+            claim_text = None
+        else:
+            # All topics truly exhausted
+            return {
+                "action": "END_INTERVIEW",
+                "topic": "CLOSING",
+                "subtopic": "Summary & Reflection",
+                "skill": "Closing",
+                "project": "Project",
+                "claim": None
+            }
 
     return {
-        "retrieved_chunks": retrieved,
-        "retrieval_query": query_text
+        "action": "SWITCH_TOPIC",
+        "topic": topic,
+        "subtopic": subtopic,
+        "skill": skill,
+        "project": project,
+        "claim": claim_text
     }
 
 # ========================================================
-# 7. NODE 4: DECIDE NEXT INTERVIEW ACTION (LIVE BRAIN)
+# 7. NODE 3: DECIDE NEXT INTERVIEW ACTION (LIVE BRAIN)
 # ========================================================
 
 def decide_next_interview_action_node(state: ConversationalInterviewState) -> Dict[str, Any]:
     """
     Live Interviewer Decision Engine (Level 2 Intelligence):
-    Inputs:
-    - currentPerspective
-    - candidateAnswer & answerAnalysis
-    - retrievedResumeContext
-    - conversationHistory & previousInteractions
-    - remainingTimeSeconds
-    Selects action: GO_DEEPER, CLARIFY, CHALLENGE, EXPLORE_NEW_DETAIL, SWITCH_TOPIC, END_INTERVIEW.
+    Evaluates answer, enforces hard decision rules, and directs topic flow.
     """
     round_number = state.get("round_number", 1)
     difficulty = state.get("difficulty", "MEDIUM")
-    candidate_id = state.get("candidate_id", "candidate-default")
-    session_id = state.get("session_id", "session-default")
     remaining_seconds = state.get("remaining_seconds", 2700)
     perspective = state.get("perspective") or "SYSTEM_ARCHITECTURE"
     p_meta = INTERVIEW_PERSPECTIVES.get(perspective, INTERVIEW_PERSPECTIVES["SYSTEM_ARCHITECTURE"])
     resume_context = state.get("resume_context") or {}
     analysis = state.get("answer_analysis") or {"classification": "OPENER"}
-    retrieved = state.get("retrieved_chunks") or []
     history = state.get("conversation_history") or []
-    prev_interactions = state.get("previous_interactions") or []
-    historical_questions = state.get("historical_questions") or []
 
-    claims = extract_claims_from_context(resume_context)
     projects = state.get("priority_projects") or [p if isinstance(p, str) else (p.get("title") or p.get("name") or "Project") for p in (resume_context.get("projects") or [])]
     project = projects[0] if projects else "Project"
 
     current_topic = state.get("current_topic")
+    current_subtopic = state.get("current_subtopic")
     if not current_topic and history:
         current_topic = history[-1].get("topic")
+        current_subtopic = history[-1].get("subtopic")
     if not current_topic and analysis.get("technologies_mentioned"):
         current_topic = analysis.get("technologies_mentioned")[0]
+        current_subtopic = f"{current_topic} Fundamentals"
+    if not current_topic and state.get("historical_questions"):
+        last_q = state.get("historical_questions")[-1].lower()
+        tech_keywords = {
+            "RAG": ["rag", "retrieval", "vector", "embedding", "chroma"],
+            "Spring Boot": ["spring", "controller", "backend"],
+            "React": ["react", "frontend", "component"],
+            "MySQL": ["mysql", "database", "query", "schema"],
+            "JWT": ["jwt", "token", "auth"]
+        }
+        for t_k, kws in tech_keywords.items():
+            if any(kw in last_q for kw in kws):
+                current_topic = t_k
+                current_subtopic = f"{t_k} Question"
+                break
+    if not current_topic:
+        claims = state.get("claims") or extract_claims_from_context(resume_context)
+        if claims:
+            current_topic = claims[0].get("technology") or claims[0].get("concept")
+            current_subtopic = claims[0].get("subtopic") or f"{current_topic} Fundamentals"
+        else:
+            current_topic = "Architecture"
+            current_subtopic = "System Design"
+
+    current_skill = current_topic or "Architecture"
     current_depth = state.get("current_depth", 0)
     topics_discussed = list(state.get("topics_discussed") or [])
-    claims_explored = list(state.get("claims_explored") or [])
+    skipped_subtopics = list(state.get("skipped_subtopics") or [])
+    unknown_topics = list(state.get("unknown_topics") or [])
+    exhausted_topics = list(state.get("exhausted_topics") or [])
+    follow_up_count = state.get("follow_up_count", 0)
 
-    # 1. Check for session completion / time expiry
+    # 1. Session completion / time expiry check
     if round_number >= 8 or remaining_seconds <= 120:
         plan: InterviewPlan = {
             "action": "END_INTERVIEW",
@@ -770,9 +1031,24 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "is_follow_up": False,
             "transition_speech": "Thank you so much for walking through your projects and technical architecture today.",
             "semantic_fingerprint": "interview_closing_wrapup",
-            "retrieval_query": state.get("retrieval_query", "")
+            "retrieval_query": "",
+            "allow_same_topic_follow_up": False,
+            "clarification_attempted": False,
+            "reason_code": "TIME_EXPIRED"
         }
-        return {"plan": plan, "current_depth": current_depth, "current_topic": "CLOSING", "topics_discussed": topics_discussed}
+        return {
+            "plan": plan,
+            "current_depth": current_depth,
+            "current_topic": "CLOSING",
+            "current_subtopic": "Summary & Reflection",
+            "topics_discussed": topics_discussed,
+            "skipped_subtopics": skipped_subtopics,
+            "unknown_topics": unknown_topics,
+            "exhausted_topics": exhausted_topics,
+            "allow_same_topic_follow_up": False,
+            "clarification_attempted": False,
+            "reason_code": "TIME_EXPIRED"
+        }
 
     # 2. Turn 1: Natural Opener
     last_ans = (state.get("last_candidate_answer") or "").strip()
@@ -792,145 +1068,275 @@ def decide_next_interview_action_node(state: ConversationalInterviewState) -> Di
             "is_follow_up": False,
             "transition_speech": "",
             "semantic_fingerprint": "introduction|career_overview|project_experience",
-            "retrieval_query": state.get("retrieval_query", "")
+            "retrieval_query": "",
+            "allow_same_topic_follow_up": True,
+            "clarification_attempted": False,
+            "reason_code": "INTERVIEW_OPENER"
         }
-        return {"plan": plan, "current_depth": 0, "current_topic": "INTRODUCTION", "topics_discussed": ["INTRODUCTION"]}
+        return {
+            "plan": plan,
+            "current_depth": 0,
+            "current_topic": "INTRODUCTION",
+            "current_subtopic": "Engineering Background & Projects",
+            "topics_discussed": ["INTRODUCTION"],
+            "skipped_subtopics": skipped_subtopics,
+            "unknown_topics": unknown_topics,
+            "exhausted_topics": exhausted_topics,
+            "allow_same_topic_follow_up": True,
+            "clarification_attempted": False,
+            "reason_code": "INTERVIEW_OPENER"
+        }
 
-    cls = analysis.get("classification")
-    mentioned_techs = analysis.get("technologies_mentioned") or []
+    # 3. Deterministic Decision Enforcement (Parts 6 & 7)
+    decision = enforce_interview_decision(state, analysis)
+    action = decision["action"]
+    reason_code = decision["reason_code"]
+    allow_same_topic = decision["allow_same_topic_follow_up"]
 
-    # 3. Candidate answered "I don't know" or timed out -> Graceful SWITCH_TOPIC
-    if cls in ["I_DONT_KNOW", "NO_ANSWER"]:
-        transition_msg = random.choice(NO_ANSWER_PHRASES)
-        # Select next unexplored claim or priority topic
-        unexplored = [c for c in claims if c["concept"] not in topics_discussed and c["technology"] not in topics_discussed]
-        chosen_claim = unexplored[0] if unexplored else (random.choice(claims) if claims else None)
-        topic = chosen_claim["concept"] if chosen_claim else "SYSTEM_DESIGN"
-        skill = chosen_claim["technology"] if chosen_claim else "Architecture"
+    # 4. Handle SWITCH_TOPIC
+    if action == "SWITCH_TOPIC":
+        # Record skipped/unknown subtopic
+        if current_subtopic and current_subtopic not in skipped_subtopics:
+            skipped_subtopics.append(current_subtopic)
+        if current_topic and current_topic not in skipped_subtopics:
+            skipped_subtopics.append(current_topic)
+
+        if reason_code == "EXPLICIT_UNKNOWN":
+            if current_subtopic and current_subtopic not in unknown_topics:
+                unknown_topics.append(current_subtopic)
+            if current_topic and current_topic not in unknown_topics:
+                unknown_topics.append(current_topic)
+            transition_msg = random.choice(NO_ANSWER_PHRASES)
+        elif reason_code == "NOT_IMPLEMENTED_BY_CANDIDATE":
+            transition_msg = "Understood, that makes total sense since you weren't personally implementing that part. Let's focus on what you personally built."
+        elif reason_code == "CLARIFICATION_BUDGET_EXHAUSTED":
+            transition_msg = "Understood, thanks for clarifying. Let's move on to another technical component from your background."
+        elif reason_code == "TOPIC_DEPTH_EXHAUSTED":
+            if current_topic and current_topic not in exhausted_topics:
+                exhausted_topics.append(current_topic)
+            transition_msg = random.choice(TRANSITION_PHRASES)
+        else:
+            transition_msg = random.choice(TRANSITION_PHRASES)
+
+        # Select distinct alternative topic
+        alt = select_next_alternative_topic(state, current_topic, current_subtopic, current_skill)
+        if alt["action"] == "END_INTERVIEW":
+            # Graceful ending if all topics exhausted
+            plan: InterviewPlan = {
+                "action": "END_INTERVIEW",
+                "topic": "CLOSING",
+                "subtopic": "Summary & Reflection",
+                "skill": "Closing",
+                "project": project,
+                "claim": None,
+                "angle": "REFLECTION",
+                "style": "DIRECT",
+                "difficulty": "EASY",
+                "reason": "All resume topic areas have been thoroughly explored.",
+                "expected_concepts": ["Reflection", "Career aspirations"],
+                "is_follow_up": False,
+                "transition_speech": "Thank you so much. We have covered your main technical areas thoroughly today.",
+                "semantic_fingerprint": "interview_closing_wrapup",
+                "retrieval_query": "",
+                "allow_same_topic_follow_up": False,
+                "clarification_attempted": False,
+                "reason_code": "ALL_TOPICS_EXHAUSTED"
+            }
+            return {
+                "plan": plan,
+                "current_depth": current_depth,
+                "current_topic": "CLOSING",
+                "current_subtopic": "Summary & Reflection",
+                "topics_discussed": topics_discussed,
+                "skipped_subtopics": skipped_subtopics,
+                "unknown_topics": unknown_topics,
+                "exhausted_topics": exhausted_topics,
+                "allow_same_topic_follow_up": False,
+                "clarification_attempted": False,
+                "reason_code": "ALL_TOPICS_EXHAUSTED"
+            }
+
+        new_topic = alt["topic"]
+        new_subtopic = alt["subtopic"]
+        new_skill = alt["skill"]
+        new_project = alt["project"]
+
+        avail_angles = p_meta.get("angles", ["ARCHITECTURE", "SCALABILITY", "TRADEOFF", "SECURITY"])
+        angle = avail_angles[round_number % len(avail_angles)]
 
         plan: InterviewPlan = {
             "action": "SWITCH_TOPIC",
-            "topic": topic,
-            "subtopic": f"{skill} Fundamentals",
-            "skill": skill,
-            "project": project,
-            "claim": chosen_claim["claim"] if chosen_claim else None,
-            "angle": "IMPLEMENTATION",
-            "style": "DIRECT",
-            "difficulty": "MEDIUM",
-            "reason": "Candidate indicated lack of familiarity or timed out. Transitioning smoothly to another resume area.",
-            "expected_concepts": [skill, "Implementation"],
+            "topic": new_topic,
+            "subtopic": new_subtopic,
+            "skill": new_skill,
+            "project": new_project,
+            "claim": alt.get("claim"),
+            "angle": angle,
+            "style": p_meta.get("style", "PROJECT_SPECIFIC"),
+            "difficulty": difficulty,
+            "reason": f"Transitioning to unexplored topic area {new_skill} (Reason: {reason_code}).",
+            "expected_concepts": [new_skill, "Architecture"],
             "is_follow_up": False,
             "transition_speech": transition_msg,
-            "semantic_fingerprint": f"{topic.lower()}|{skill.lower()}|switch_topic",
-            "retrieval_query": state.get("retrieval_query", "")
+            "semantic_fingerprint": f"{new_topic.lower()}|{new_skill.lower()}|{angle.lower()}",
+            "retrieval_query": "",
+            "allow_same_topic_follow_up": False,
+            "clarification_attempted": False,
+            "reason_code": reason_code
         }
-        topics_discussed.append(topic)
-        return {"plan": plan, "current_depth": 1, "current_topic": topic, "topics_discussed": topics_discussed}
+        if new_skill not in topics_discussed:
+            topics_discussed.append(new_skill)
 
-    # 4. Candidate mentioned specific domain from intro/turn (e.g., RAG, React, MySQL, JWT)
-    # Target topic adapts immediately to candidate's spoken area!
-    active_skill = mentioned_techs[0] if mentioned_techs else (current_topic or "Architecture")
-
-    # 5. Candidate mentioned an unprompted interesting detail -> EXPLORE_NEW_DETAIL
-    if cls == "INTERESTING_DETAIL":
-        detail = analysis.get("interesting_details", ["system optimization"])[0]
-        plan: InterviewPlan = {
-            "action": "EXPLORE_NEW_DETAIL",
-            "topic": f"{active_skill.upper()}_{detail.upper().replace(' ', '_')}",
-            "subtopic": detail.title(),
-            "skill": active_skill,
-            "project": project,
-            "claim": None,
-            "angle": "DEBUGGING" if "issue" in detail or "bottleneck" in detail else "OPTIMIZATION",
-            "style": "FOLLOW_UP",
-            "difficulty": "HARD" if difficulty == "HARD" else "MEDIUM",
-            "reason": f"Candidate highlighted an unprompted real-world engineering challenge ({detail}). Investigating diagnosis and resolution.",
-            "expected_concepts": [active_skill, detail, "Root cause analysis", "Resolution trade-offs"],
-            "is_follow_up": True,
-            "transition_speech": f"That's interesting that you encountered a {detail}.",
-            "semantic_fingerprint": f"{active_skill.lower()}|{detail.lower()}|investigation",
-            "retrieval_query": state.get("retrieval_query", "")
+        return {
+            "plan": plan,
+            "current_depth": 1,
+            "current_topic": new_skill,
+            "current_subtopic": new_subtopic,
+            "current_topic_state": "IN_PROGRESS",
+            "topics_discussed": topics_discussed,
+            "skipped_subtopics": skipped_subtopics,
+            "unknown_topics": unknown_topics,
+            "exhausted_topics": exhausted_topics,
+            "clarification_attempted": False,
+            "follow_up_count": 0,
+            "allow_same_topic_follow_up": False,
+            "reason_code": reason_code
         }
-        return {"plan": plan, "current_depth": current_depth + 1, "current_topic": active_skill, "topics_discussed": topics_discussed}
 
-    # 6. Candidate gave a STRONG answer -> GO_DEEPER if topic depth < 3
-    if cls == "STRONG" and current_depth < 3:
-        # Choose perspective-aligned angle
-        avail_angles = p_meta.get("angles", ["OPTIMIZATION", "FAILURE", "SCALABILITY", "TRADEOFF", "SECURITY"])
-        angle = avail_angles[current_depth % len(avail_angles)]
-        plan: InterviewPlan = {
-            "action": "GO_DEEPER",
-            "topic": active_skill,
-            "subtopic": f"{active_skill} Advanced Architecture & Edge Cases",
-            "skill": active_skill,
-            "project": project,
-            "claim": None,
-            "angle": angle,
-            "style": p_meta.get("style", "SCENARIO"),
-            "difficulty": "HARD" if difficulty == "HARD" else "MEDIUM",
-            "reason": f"Candidate provided a strong answer. Probing deeper into practical resilience, concurrency, or scale via {angle} under {perspective}.",
-            "expected_concepts": [active_skill, f"{angle.lower()} analysis", "Production edge cases"],
-            "is_follow_up": True,
-            "transition_speech": random.choice(ACKNOWLEDGEMENT_PHRASES),
-            "semantic_fingerprint": f"{active_skill.lower()}|{perspective.lower()}|{angle.lower()}",
-            "retrieval_query": state.get("retrieval_query", "")
-        }
-        return {"plan": plan, "current_depth": current_depth + 1, "current_topic": active_skill, "topics_discussed": topics_discussed}
-
-    # 7. Candidate gave a PARTIAL or WEAK answer -> CLARIFY
-    if cls in ["PARTIAL", "WEAK"] and current_depth < 3:
+    # 5. Handle CLARIFY (Follow-up Budget = 1)
+    if action == "CLARIFY":
         plan: InterviewPlan = {
             "action": "CLARIFY",
-            "topic": active_skill,
-            "subtopic": f"{active_skill} Specific Implementation Mechanics",
-            "skill": active_skill,
+            "topic": current_topic or current_skill,
+            "subtopic": current_subtopic or f"{current_skill} Implementation Mechanics",
+            "skill": current_skill,
             "project": project,
             "claim": None,
             "angle": "IMPLEMENTATION",
             "style": "FOLLOW_UP",
             "difficulty": "MEDIUM",
-            "reason": "Candidate provided a vague or partial answer. Probing for specific implementation mechanism.",
-            "expected_concepts": [active_skill, "Implementation details"],
+            "reason": "Candidate provided a partial answer. Probing for specific implementation mechanism (clarification 1 of 1).",
+            "expected_concepts": [current_skill, "Implementation details"],
             "is_follow_up": True,
             "transition_speech": random.choice(ACKNOWLEDGEMENT_PHRASES),
-            "semantic_fingerprint": f"{active_skill.lower()}|clarify|implementation",
-            "retrieval_query": state.get("retrieval_query", "")
+            "semantic_fingerprint": f"{current_skill.lower()}|clarify|implementation",
+            "retrieval_query": "",
+            "allow_same_topic_follow_up": True,
+            "clarification_attempted": True,
+            "reason_code": "CLARIFY_ONCE"
         }
-        return {"plan": plan, "current_depth": current_depth + 1, "current_topic": active_skill, "topics_discussed": topics_discussed}
+        return {
+            "plan": plan,
+            "current_depth": current_depth + 1,
+            "current_topic": current_skill,
+            "current_subtopic": current_subtopic,
+            "current_topic_state": "PARTIALLY_UNDERSTOOD",
+            "topics_discussed": topics_discussed,
+            "skipped_subtopics": skipped_subtopics,
+            "unknown_topics": unknown_topics,
+            "exhausted_topics": exhausted_topics,
+            "clarification_attempted": True,
+            "follow_up_count": follow_up_count + 1,
+            "allow_same_topic_follow_up": True,
+            "reason_code": "CLARIFY_ONCE"
+        }
 
-    # 8. Topic exhausted (depth >= 3) or transition turn -> SWITCH_TOPIC
-    transition_msg = random.choice(TRANSITION_PHRASES)
-    unexplored_claims = [c for c in claims if c["concept"] not in topics_discussed and c["technology"] not in topics_discussed]
-    chosen_claim = unexplored_claims[0] if unexplored_claims else (random.choice(claims) if claims else None)
+    # 6. Handle GO_DEEPER / EXPLORE_NEW_DETAIL
+    avail_angles = p_meta.get("angles", ["OPTIMIZATION", "FAILURE", "SCALABILITY", "TRADEOFF", "SECURITY"])
+    angle = avail_angles[current_depth % len(avail_angles)]
 
-    topic = chosen_claim["concept"] if chosen_claim else "SYSTEM_DESIGN"
-    skill = chosen_claim["technology"] if chosen_claim else "Architecture"
-    project_claim = chosen_claim.get("project") if chosen_claim else project
-
-    # Align angle with perspective
-    avail_angles = p_meta.get("angles", ["ARCHITECTURE", "SCALABILITY", "TRADEOFF", "SECURITY"])
-    angle = avail_angles[round_number % len(avail_angles)]
+    if action == "EXPLORE_NEW_DETAIL":
+        detail = analysis.get("interesting_details", ["system optimization"])[0]
+        subtopic_title = detail.title()
+        reason_desc = f"Candidate highlighted an unprompted real-world engineering challenge ({detail}). Investigating diagnosis and resolution."
+        trans_text = f"That's interesting that you encountered a {detail}."
+        angle_name = "DEBUGGING" if "issue" in detail or "bottleneck" in detail else "OPTIMIZATION"
+    else:
+        subtopic_title = f"{current_skill} Advanced Architecture & Edge Cases"
+        reason_desc = f"Candidate demonstrated strong knowledge. Probing deeper into practical resilience via {angle} under {perspective}."
+        trans_text = random.choice(ACKNOWLEDGEMENT_PHRASES)
+        angle_name = angle
 
     plan: InterviewPlan = {
-        "action": "SWITCH_TOPIC",
-        "topic": topic,
-        "subtopic": f"{skill} {angle.capitalize()}",
-        "skill": skill,
-        "project": project_claim,
-        "claim": chosen_claim["claim"] if chosen_claim else None,
-        "angle": angle,
-        "style": p_meta.get("style", "PROJECT_SPECIFIC"),
-        "difficulty": difficulty,
-        "reason": f"Transitioning to unexplored resume claim for {skill} under {perspective}.",
-        "expected_concepts": [skill, "Architecture"],
-        "is_follow_up": False,
-        "transition_speech": transition_msg,
-        "semantic_fingerprint": f"{topic.lower()}|{skill.lower()}|{angle.lower()}",
-        "retrieval_query": state.get("retrieval_query", "")
+        "action": action,
+        "topic": current_topic or current_skill,
+        "subtopic": subtopic_title,
+        "skill": current_skill,
+        "project": project,
+        "claim": None,
+        "angle": angle_name,
+        "style": p_meta.get("style", "SCENARIO"),
+        "difficulty": "HARD" if difficulty == "HARD" else "MEDIUM",
+        "reason": reason_desc,
+        "expected_concepts": [current_skill, f"{angle_name.lower()} analysis", "Production edge cases"],
+        "is_follow_up": True,
+        "transition_speech": trans_text,
+        "semantic_fingerprint": f"{current_skill.lower()}|{perspective.lower()}|{angle_name.lower()}",
+        "retrieval_query": "",
+        "allow_same_topic_follow_up": True,
+        "clarification_attempted": False,
+        "reason_code": reason_code
     }
-    topics_discussed.append(topic)
-    return {"plan": plan, "current_depth": 1, "current_topic": topic, "topics_discussed": topics_discussed}
+    return {
+        "plan": plan,
+        "current_depth": current_depth + 1,
+        "current_topic": current_skill,
+        "current_subtopic": subtopic_title,
+        "current_topic_state": "UNDERSTOOD",
+        "topics_discussed": topics_discussed,
+        "skipped_subtopics": skipped_subtopics,
+        "unknown_topics": unknown_topics,
+        "exhausted_topics": exhausted_topics,
+        "clarification_attempted": False,
+        "follow_up_count": follow_up_count + 1,
+        "allow_same_topic_follow_up": True,
+        "reason_code": reason_code
+    }
+
+# ========================================================
+# 8. NODE 4: RETRIEVE RESUME CONTEXT (DYNAMIC RETRIEVAL - PART 14)
+# ========================================================
+
+def retrieve_resume_context_node(state: ConversationalInterviewState) -> Dict[str, Any]:
+    """
+    Queries ChromaDB with candidate isolation filter (Part 14).
+    Dynamically queries based on the DECIDED target topic from decide_action!
+    """
+    candidate_id = state.get("candidate_id", "candidate-default")
+    resume_context = state.get("resume_context") or {}
+    plan = state.get("plan") or {}
+    target_skill = plan.get("skill") or "Architecture"
+    target_topic = plan.get("topic") or "System Design"
+    target_project = plan.get("project") or ""
+    perspective = state.get("perspective") or "SYSTEM_ARCHITECTURE"
+
+    # Ensure candidate resume is indexed in ChromaDB once
+    global _indexed_candidates
+    if candidate_id not in _indexed_candidates:
+        try:
+            chunk_and_index_resume(
+                candidate_id=candidate_id,
+                resume_id="current_active_resume",
+                resume_data=resume_context
+            )
+            _indexed_candidates.add(candidate_id)
+        except Exception as e:
+            logger.warning(f"Chroma indexing note: {e}")
+
+    # Build dynamic query for the target skill and project decided by brain
+    query_text = f"candidate {target_skill} {target_topic} {target_project} {perspective}".strip()
+
+    retrieved = retrieve_relevant_resume_knowledge(
+        candidate_id=candidate_id,
+        resume_id=None,
+        query_text=query_text,
+        n_results=4
+    )
+
+    return {
+        "retrieved_chunks": retrieved,
+        "retrieval_query": query_text
+    }
 
 # ========================================================
 # 8. NODE 5: GENERATE NATURAL INTERVIEW QUESTION
@@ -1346,26 +1752,45 @@ def validate_question_node(state: ConversationalInterviewState) -> Dict[str, Any
     # Check for semantic / exact duplicate
     fp = turn.get("semantic_fingerprint") or normalize_fingerprint(q_text)
     historical_questions = state.get("historical_questions") or []
-    is_duplicate = any(normalize_fingerprint(hq) == fp for hq in historical_questions)
+    seen_set = {normalize_fingerprint(hq) for hq in historical_questions}
+    is_duplicate = fp in seen_set
 
     validation_result = "PASSED"
-    if is_duplicate:
-        validation_result = "DUPLICATE_DETECTED_REPLACED"
-        seen_set = {normalize_fingerprint(hq) for hq in historical_questions}
+
+    # Part 12: Validate that SWITCH_TOPIC question does not re-probe skipped subtopics
+    skipped_subs = state.get("skipped_subtopics") or []
+    bad_words = set()
+    if action == "SWITCH_TOPIC" and skipped_subs:
+        for s in skipped_subs:
+            for w in s.lower().replace("_", " ").split():
+                if len(w) >= 4 and w not in ["with", "that", "this", "from", "into", "using"]:
+                    bad_words.add(w)
+
+    contains_skipped = bool(bad_words and any(bw in q_text.lower() for bw in bad_words))
+
+    if contains_skipped or is_duplicate:
+        if contains_skipped:
+            validation_result = "REJECTED_SKIPPED_SUBTOPIC_REPLACED"
+            logger.warning(f"Validation rejected question containing skipped subtopic keywords: {q_text}")
+        else:
+            validation_result = "DUPLICATE_DETECTED_REPLACED"
+
         round_num = state.get("round_number", 1)
-        fallback_angles = ["CONCURRENCY", "MEMORY", "SCALABILITY", "SECURITY", "FAILURE", "OPTIMIZATION", "DESIGN_REVIEW", "TRADEOFF", "DEBUGGING"]
+        fallback_angles = ["CONCURRENCY", "MEMORY", "SCALABILITY", "SECURITY", "FAILURE", "OPTIMIZATION", "DESIGN_REVIEW", "TRADEOFF", "DEBUGGING", "ARCHITECTURE", "IMPLEMENTATION"]
         
         replacement_q = None
-        for i, alt_angle in enumerate(fallback_angles):
+        for alt_angle in fallback_angles:
             candidates = [
                 f"In {project}, when engineering {skill} for high-throughput {alt_angle.lower()} resilience, what architectural decisions did you make?",
                 f"How did you isolate and resolve {alt_angle.lower()} bottlenecks in your {skill} layer on {project}?",
                 f"Suppose {alt_angle.lower()} issues emerge in {skill} during peak load on {project}. What are your diagnostic triage steps?",
-                f"What trade-offs did you navigate when designing the {alt_angle.lower()} model for {skill} in {project}?"
+                f"What trade-offs did you navigate when designing the {alt_angle.lower()} model for {skill} in {project}?",
+                f"Looking at your work with {skill} on {project}, how did you ensure robust {alt_angle.lower()} performance in production?"
             ]
             for cand in candidates:
                 cand_fp = normalize_fingerprint(cand)
-                if cand_fp not in seen_set:
+                cand_lower = cand.lower()
+                if cand_fp not in seen_set and not any(bw in cand_lower for bw in bad_words):
                     replacement_q = cand
                     turn["angle"] = alt_angle
                     break
@@ -1376,7 +1801,7 @@ def validate_question_node(state: ConversationalInterviewState) -> Dict[str, Any
             replacement_q = f"In {project}, regarding {skill} under round {round_num}, how did you validate end-to-end reliability?"
 
         turn["question_text"] = replacement_q
-        turn["full_speech_text"] = replacement_q
+        turn["full_speech_text"] = f"{plan.get('transition_speech', '')} {replacement_q}".strip() if contains_skipped else replacement_q
         turn["semantic_fingerprint"] = normalize_fingerprint(replacement_q)
 
     # Section 41: Development Debug Logging
@@ -1396,7 +1821,7 @@ RETRIEVED CHUNKS:      {len(retrieved)} chunk(s)
 DECISION:              {action}
 TARGET TOPIC:          {topic}
 TARGET ANGLE:          {angle}
-GENERATED QUESTION:    {q_text}
+GENERATED QUESTION:    {turn.get('question_text')}
 VALIDATION RESULT:     {validation_result}
 ============================================================
 """
@@ -1406,7 +1831,7 @@ VALIDATION RESULT:     {validation_result}
     return {"generated_turn": turn}
 
 # ========================================================
-# 10. LANGGRAPH WORKFLOW ASSEMBLY
+# 10. LANGGRAPH WORKFLOW ASSEMBLY (PART 14)
 # ========================================================
 
 def create_resume_conversational_interview_graph():
@@ -1414,16 +1839,16 @@ def create_resume_conversational_interview_graph():
 
     workflow.add_node("select_perspective", select_interview_perspective_node)
     workflow.add_node("analyze_answer", analyze_candidate_answer_node)
-    workflow.add_node("retrieve_resume_context", retrieve_resume_context_node)
     workflow.add_node("decide_action", decide_next_interview_action_node)
+    workflow.add_node("retrieve_resume_context", retrieve_resume_context_node)
     workflow.add_node("generate_question", generate_natural_interview_question_node)
     workflow.add_node("validate_question", validate_question_node)
 
     workflow.add_edge(START, "select_perspective")
     workflow.add_edge("select_perspective", "analyze_answer")
-    workflow.add_edge("analyze_answer", "retrieve_resume_context")
-    workflow.add_edge("retrieve_resume_context", "decide_action")
-    workflow.add_edge("decide_action", "generate_question")
+    workflow.add_edge("analyze_answer", "decide_action")
+    workflow.add_edge("decide_action", "retrieve_resume_context")
+    workflow.add_edge("retrieve_resume_context", "generate_question")
     workflow.add_edge("generate_question", "validate_question")
     workflow.add_edge("validate_question", END)
 
@@ -1553,10 +1978,47 @@ Respond STRICTLY in JSON format matching the schema.
 
 def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQuestionResponse:
     """
-    Public endpoint entry point for question generation.
+    Public endpoint entry point for question generation with state persistence (Part 13).
     """
+    session_id = request.session_id or "session-default"
+    
+    # 1. Retrieve persistent session state
+    persisted = _session_interview_state.get(session_id, {})
+    
+    current_topic = persisted.get("current_topic")
+    current_subtopic = persisted.get("current_subtopic")
+    current_depth = persisted.get("current_depth", 0)
+    current_topic_state = persisted.get("current_topic_state")
+    clarification_attempted = persisted.get("clarification_attempted", False)
+    follow_up_count = persisted.get("follow_up_count", 0)
+    skipped_subtopics = list(persisted.get("skipped_subtopics", []))
+    unknown_topics = list(persisted.get("unknown_topics", []))
+    exhausted_topics = list(persisted.get("exhausted_topics", []))
+    topics_discussed = list(persisted.get("topics_discussed", []))
+    claims_explored = list(persisted.get("claims_explored", []))
+    
+    # Fallback reconstruction from request.previous_interactions if persistent state empty
+    if not persisted and request.previous_interactions:
+        for interaction in request.previous_interactions:
+            if isinstance(interaction, dict):
+                top = interaction.get("topic")
+                if top and top not in topics_discussed:
+                    topics_discussed.append(top)
+                subtop = interaction.get("subtopic")
+                act = interaction.get("action")
+                if act in ["CLARIFY", "CLARIFY_ONCE"]:
+                    clarification_attempted = True
+                if act == "SWITCH_TOPIC" and subtop and subtop not in skipped_subtopics:
+                    skipped_subtopics.append(subtop)
+                if interaction.get("current_depth") is not None:
+                    current_depth = interaction["current_depth"]
+                if top:
+                    current_topic = top
+                if subtop:
+                    current_subtopic = subtop
+
     state_input: ConversationalInterviewState = {
-        "session_id": request.session_id,
+        "session_id": session_id,
         "candidate_id": request.candidate_id,
         "candidate_name": request.candidate_name or "Candidate",
         "round_number": request.round_number,
@@ -1576,15 +2038,24 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
         "previous_perspectives": request.previous_perspectives or [],
         "priority_topics": [],
         "priority_projects": [],
-        "claims_explored": [],
+        "claims_explored": claims_explored,
         "claims_remaining": [],
         "angles_explored": [],
         "retrieved_chunks": [],
         "retrieval_query": "",
         "answer_analysis": None,
-        "current_topic": None,
-        "current_depth": 0,
-        "topics_discussed": [],
+        "current_topic": current_topic,
+        "current_subtopic": current_subtopic,
+        "current_depth": current_depth,
+        "current_topic_state": current_topic_state,
+        "clarification_attempted": clarification_attempted,
+        "follow_up_count": follow_up_count,
+        "skipped_subtopics": skipped_subtopics,
+        "unknown_topics": unknown_topics,
+        "exhausted_topics": exhausted_topics,
+        "allow_same_topic_follow_up": persisted.get("allow_same_topic_follow_up", True),
+        "reason_code": persisted.get("reason_code"),
+        "topics_discussed": topics_discussed,
         "plan": None,
         "generated_turn": None,
         "errors": []
@@ -1594,20 +2065,38 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
     turn = result.get("generated_turn") or {}
     perspective = result.get("perspective") or "SYSTEM_ARCHITECTURE"
     goal = result.get("perspective_goal") or ""
+    plan = result.get("plan") or {}
+
+    # Persist updated session state for subsequent turns
+    _session_interview_state[session_id] = {
+        "current_topic": result.get("current_topic"),
+        "current_subtopic": result.get("current_subtopic"),
+        "current_depth": result.get("current_depth", 0),
+        "current_topic_state": result.get("current_topic_state"),
+        "clarification_attempted": result.get("clarification_attempted", False),
+        "follow_up_count": result.get("follow_up_count", 0),
+        "skipped_subtopics": result.get("skipped_subtopics", []),
+        "unknown_topics": result.get("unknown_topics", []),
+        "exhausted_topics": result.get("exhausted_topics", []),
+        "topics_discussed": result.get("topics_discussed", []),
+        "claims_explored": result.get("claims_explored", []),
+        "allow_same_topic_follow_up": result.get("allow_same_topic_follow_up", False),
+        "reason_code": result.get("reason_code")
+    }
 
     return GenerateQuestionResponse(
-        action=turn.get("action", "ASK_QUESTION"),
+        action=turn.get("action", plan.get("action", "ASK_QUESTION")),
         acknowledgement=turn.get("acknowledgement", ""),
         question_text=turn.get("question_text", "Could you walk me through your engineering background?"),
         full_speech_text=turn.get("full_speech_text", "Could you walk me through your engineering background?"),
         question_category=turn.get("question_category", perspective),
         question_source=turn.get("question_source", f"Resume AI Interviewer -> {perspective}"),
-        topic=turn.get("topic", f"{perspective} Exploration"),
-        subtopic=turn.get("subtopic"),
-        skill=turn.get("skill"),
-        project=turn.get("project"),
-        angle=turn.get("angle"),
-        question_type=turn.get("question_type"),
+        topic=turn.get("topic", plan.get("topic", f"{perspective} Exploration")),
+        subtopic=turn.get("subtopic", plan.get("subtopic")),
+        skill=turn.get("skill", plan.get("skill")),
+        project=turn.get("project", plan.get("project")),
+        angle=turn.get("angle", plan.get("angle")),
+        question_type=turn.get("question_type", plan.get("style")),
         semantic_fingerprint=turn.get("semantic_fingerprint"),
         hints=turn.get("hints", []),
         ideal_key_points=turn.get("ideal_key_points", []),
@@ -1615,5 +2104,11 @@ def generate_interview_question(request: GenerateQuestionRequest) -> GenerateQue
         difficulty=turn.get("difficulty", "MEDIUM"),
         is_completed=turn.get("is_completed", False),
         perspective=perspective,
-        perspective_goal=goal
+        perspective_goal=goal,
+        allow_same_topic_follow_up=result.get("allow_same_topic_follow_up"),
+        clarification_attempted=result.get("clarification_attempted"),
+        current_topic_state=result.get("current_topic_state"),
+        reason_code=result.get("reason_code"),
+        skipped_subtopics=result.get("skipped_subtopics", [])
     )
+
