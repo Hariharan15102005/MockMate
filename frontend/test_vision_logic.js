@@ -1,6 +1,10 @@
 // Node test script for VisualSessionAggregator and Vision Measurement Logic
 import assert from 'assert';
 
+
+// Import VisualSessionAggregator logic
+// Import VisualSessionAggregator logic
+// Import VisualSessionAggregator logic
 // Import VisualSessionAggregator logic
 class VisualSessionAggregator {
   constructor() {
